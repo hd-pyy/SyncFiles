@@ -8,6 +8,7 @@ class FakeRunner:
     def __init__(self, outputs: dict[tuple[str, ...], subprocess.CompletedProcess[str]]) -> None:
         self.outputs = outputs
         self.calls: list[tuple[str, ...]] = []
+        self.call_kwargs: list[dict[str, object]] = []
 
     def __call__(
         self,
@@ -15,10 +16,21 @@ class FakeRunner:
         *,
         capture_output: bool = True,
         text: bool = True,
+        encoding: str | None = None,
+        errors: str | None = None,
         check: bool = False,
     ) -> subprocess.CompletedProcess[str]:
         key = tuple(command)
         self.calls.append(key)
+        self.call_kwargs.append(
+            {
+                "capture_output": capture_output,
+                "text": text,
+                "encoding": encoding,
+                "errors": errors,
+                "check": check,
+            }
+        )
         result = self.outputs[key]
         if check and result.returncode != 0:
             raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
@@ -53,7 +65,7 @@ def test_lists_phone_directories() -> None:
                 "adb",
                 "shell",
                 "find",
-                "/sdcard",
+                "/sdcard/",
                 "-maxdepth",
                 "1",
                 "-mindepth",
@@ -69,28 +81,79 @@ def test_lists_phone_directories() -> None:
     assert directories == ["/sdcard/DCIM", "/sdcard/Documents"]
 
 
-def test_scans_phone_folder_to_file_records() -> None:
+def test_lists_phone_directories_with_trailing_slash_for_symlink_roots() -> None:
     runner = FakeRunner(
         {
             (
                 "adb",
                 "shell",
                 "find",
-                "/sdcard/Test",
+                "/sdcard/",
+                "-maxdepth",
+                "1",
+                "-mindepth",
+                "1",
                 "-type",
-                "f",
-                "-printf",
-                "%P\t%s\t%T@\n",
-            ): completed("a.txt\t3\t1710000000.0\nnested/b.jpg\t5\t1710000001.0\n")
+                "d",
+            ): completed("/sdcard/DCIM\n")
+        }
+    )
+
+    directories = AdbClient(runner=runner).list_directories("/sdcard")
+
+    assert directories == ["/sdcard/DCIM"]
+
+
+def test_adb_commands_request_utf8_decoding() -> None:
+    runner = FakeRunner(
+        {
+            (
+                "adb",
+                "shell",
+                "find",
+                "/sdcard/",
+                "-maxdepth",
+                "1",
+                "-mindepth",
+                "1",
+                "-type",
+                "d",
+            ): completed("/sdcard/黄鸟工具包\n")
+        }
+    )
+
+    directories = AdbClient(runner=runner).list_directories("/sdcard")
+
+    assert directories == ["/sdcard/黄鸟工具包"]
+    assert runner.call_kwargs[0]["encoding"] == "utf-8"
+    assert runner.call_kwargs[0]["errors"] == "replace"
+
+
+def test_scans_phone_folder_to_file_records() -> None:
+    scan_command = (
+        "find /sdcard/Test/ -type f -exec "
+        "stat -c '%n\t%s\t%Y' {} \\; 2>/dev/null"
+    )
+    runner = FakeRunner(
+        {
+            (
+                "adb",
+                "shell",
+                scan_command,
+            ): completed(
+                "/sdcard/Test/a.txt\t3\t1710000000\n"
+                "/sdcard/Test/nested/file with spaces.jpg\t5\t1710000001\n"
+            )
         }
     )
 
     records = AdbClient(runner=runner).scan_phone_folder("/sdcard/Test")
 
-    assert [record.relative_path for record in records] == ["a.txt", "nested/b.jpg"]
+    assert [record.relative_path for record in records] == ["a.txt", "nested/file with spaces.jpg"]
     assert records[0].size == 3
     assert records[0].modified_time == 1710000000
     assert records[0].side is SourceSide.PHONE
+    assert "-printf" not in runner.calls[0]
 
 
 def test_push_and_pull_call_adb_with_expected_paths() -> None:

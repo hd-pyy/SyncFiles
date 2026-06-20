@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ class AdbClient:
         if self.adb_path == "adb" and shutil.which("adb") is None and self.runner is subprocess.run:
             return DeviceStatus(DeviceState.ADB_MISSING, "ADB is not installed or not on PATH.")
         try:
-            result = self.runner([self.adb_path, "devices"], capture_output=True, text=True, check=False)
+            result = self._run([self.adb_path, "devices"], check=False)
         except FileNotFoundError:
             return DeviceStatus(DeviceState.ADB_MISSING, "ADB is not installed or not on PATH.")
 
@@ -56,29 +57,24 @@ class AdbClient:
         return DeviceStatus(DeviceState.ERROR, f"Unsupported device state: {state}", serial=serial)
 
     def list_directories(self, phone_path: str) -> list[str]:
-        result = self.runner(
-            [self.adb_path, "shell", "find", phone_path, "-maxdepth", "1", "-mindepth", "1", "-type", "d"],
-            capture_output=True,
-            text=True,
+        find_root = _find_root(phone_path)
+        result = self._run(
+            [self.adb_path, "shell", "find", find_root, "-maxdepth", "1", "-mindepth", "1", "-type", "d"],
             check=True,
         )
         return sorted(line.strip() for line in result.stdout.splitlines() if line.strip())
 
     def scan_phone_folder(self, phone_root: str) -> list[FileRecord]:
-        result = self.runner(
-            [self.adb_path, "shell", "find", phone_root, "-type", "f", "-printf", "%P\t%s\t%T@\n"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        find_root = _find_root(phone_root)
+        result = self._run([self.adb_path, "shell", _scan_files_command(find_root)], check=True)
         records: list[FileRecord] = []
         for line in result.stdout.splitlines():
             if not line.strip():
                 continue
-            relative_path, size, modified = line.split("\t", 2)
+            absolute_path, size, modified = line.rsplit("\t", 2)
             records.append(
                 FileRecord(
-                    relative_path=relative_path.replace("\\", "/"),
+                    relative_path=_relative_phone_path(absolute_path, find_root),
                     size=int(size),
                     modified_time=int(float(modified)),
                     side=SourceSide.PHONE,
@@ -87,10 +83,20 @@ class AdbClient:
         return sorted(records, key=lambda record: record.relative_path)
 
     def push(self, local_path: str, phone_path: str) -> None:
-        self.runner([self.adb_path, "push", local_path, phone_path], capture_output=True, text=True, check=True)
+        self._run([self.adb_path, "push", local_path, phone_path], check=True)
 
     def pull(self, phone_path: str, local_path: str) -> None:
-        self.runner([self.adb_path, "pull", phone_path, local_path], capture_output=True, text=True, check=True)
+        self._run([self.adb_path, "pull", phone_path, local_path], check=True)
+
+    def _run(self, command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
+        return self.runner(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=check,
+        )
 
 
 def _parse_devices(output: str) -> list[tuple[str, str]]:
@@ -103,3 +109,26 @@ def _parse_devices(output: str) -> list[tuple[str, str]]:
         if len(parts) >= 2:
             rows.append((parts[0], parts[1]))
     return rows
+
+
+def _find_root(phone_path: str) -> str:
+    stripped = phone_path.rstrip("/")
+    if not stripped:
+        return "/"
+    return f"{stripped}/"
+
+
+def _scan_files_command(find_root: str) -> str:
+    stat_format = "%n\t%s\t%Y"
+    return (
+        f"find {shlex.quote(find_root)} -type f -exec "
+        f"stat -c {shlex.quote(stat_format)} {{}} \\; 2>/dev/null"
+    )
+
+
+def _relative_phone_path(absolute_path: str, find_root: str) -> str:
+    normalized_path = absolute_path.replace("\\", "/")
+    normalized_root = find_root.rstrip("/") + "/"
+    if normalized_path.startswith(normalized_root):
+        return normalized_path[len(normalized_root) :]
+    return normalized_path.lstrip("/")
