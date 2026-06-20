@@ -60,6 +60,12 @@ def default_language_label() -> str:
     return LANGUAGE_LABELS[DEFAULT_LANGUAGE]
 
 
+def phone_folder_to_choose(current_path: str, selected_value: str | None) -> str:
+    if selected_value and selected_value != "..":
+        return selected_value
+    return current_path
+
+
 class SyncFilesApp:
     def __init__(self, root: Tk) -> None:
         self.root = root
@@ -192,7 +198,9 @@ class SyncFilesApp:
                 load(value)
 
         def choose() -> None:
-            self.phone_root.set(current.get())
+            selection = listing.curselection()
+            selected_value = listing.get(selection[0]) if selection else None
+            self.phone_root.set(phone_folder_to_choose(current.get(), selected_value))
             browser.destroy()
 
         listing.bind("<Double-Button-1>", enter)

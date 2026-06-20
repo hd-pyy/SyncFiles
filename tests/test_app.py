@@ -1,6 +1,11 @@
 import tkinter as tk
 
-from syncfiles.app import SyncFilesApp, build_operations_from_plan, default_language_label
+from syncfiles.app import (
+    SyncFilesApp,
+    build_operations_from_plan,
+    default_language_label,
+    phone_folder_to_choose,
+)
 from syncfiles.domain import (
     ConflictAction,
     FileRecord,
@@ -63,3 +68,12 @@ def test_busy_state_disables_folder_and_action_buttons() -> None:
         assert str(app.sync_button["state"]) == "normal"
     finally:
         root.destroy()
+
+
+def test_phone_folder_choose_prefers_highlighted_directory() -> None:
+    assert phone_folder_to_choose("/sdcard", "/sdcard/Download") == "/sdcard/Download"
+
+
+def test_phone_folder_choose_uses_current_directory_without_highlight() -> None:
+    assert phone_folder_to_choose("/sdcard/Documents", None) == "/sdcard/Documents"
+    assert phone_folder_to_choose("/sdcard/Documents", "..") == "/sdcard/Documents"
