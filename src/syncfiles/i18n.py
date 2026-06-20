@@ -128,6 +128,22 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "请先选择两个文件夹再扫描。",
         Language.ENGLISH: "Choose both folders before scanning.",
     },
+    "dialog_busy_title": {
+        Language.CHINESE: "正在处理",
+        Language.ENGLISH: "Busy",
+    },
+    "dialog_busy_message": {
+        Language.CHINESE: "当前正在扫描或同步，请等待完成后再操作。",
+        Language.ENGLISH: "A scan or sync is already running. Wait for it to finish.",
+    },
+    "dialog_no_phone_selection_title": {
+        Language.CHINESE: "未选择文件夹",
+        Language.ENGLISH: "No folder selected",
+    },
+    "dialog_no_phone_selection_message": {
+        Language.CHINESE: "请先在列表中选择一个手机文件夹。",
+        Language.ENGLISH: "Select a phone folder from the list first.",
+    },
     "log_scanning_local": {
         Language.CHINESE: "正在扫描硬盘文件夹...",
         Language.ENGLISH: "Scanning hard drive folder...",

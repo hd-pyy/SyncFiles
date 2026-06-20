@@ -1,4 +1,6 @@
-from syncfiles.app import build_operations_from_plan, default_language_label
+import tkinter as tk
+
+from syncfiles.app import SyncFilesApp, build_operations_from_plan, default_language_label
 from syncfiles.domain import (
     ConflictAction,
     FileRecord,
@@ -37,3 +39,27 @@ def test_build_operations_from_plan_includes_missing_files_and_conflict_choices(
 
 def test_default_language_label_is_chinese() -> None:
     assert default_language_label() == "中文"
+
+
+def test_busy_state_disables_folder_and_action_buttons() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+
+        assert str(app.phone_browse_button["state"]) == "normal"
+        assert str(app.scan_button["state"]) == "normal"
+
+        app._set_busy(True)
+
+        assert str(app.phone_browse_button["state"]) == "disabled"
+        assert str(app.scan_button["state"]) == "disabled"
+        assert str(app.sync_button["state"]) == "disabled"
+
+        app._set_busy(False)
+
+        assert str(app.phone_browse_button["state"]) == "normal"
+        assert str(app.scan_button["state"]) == "normal"
+        assert str(app.sync_button["state"]) == "normal"
+    finally:
+        root.destroy()

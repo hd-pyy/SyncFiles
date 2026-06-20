@@ -74,6 +74,7 @@ class SyncFilesApp:
         self.plan: SyncPlan | None = None
         self.conflict_choices: dict[str, ConflictAction] = {}
         self.device_status: DeviceStatus | None = None
+        self.busy = False
         self.translatable_widgets: list[tuple[object, str]] = []
         self.tab_text_keys: list[tuple[object, str]] = []
         self._build_ui()
@@ -86,7 +87,8 @@ class SyncFilesApp:
         ttk.Label(outer, textvariable=self.status).pack(anchor="w", fill=X)
         top_row = ttk.Frame(outer)
         top_row.pack(fill=X, pady=(4, 10))
-        self._register(ttk.Button(top_row, command=self.check_device), "button_check_device").pack(side=LEFT)
+        self.check_device_button = self._register(ttk.Button(top_row, command=self.check_device), "button_check_device")
+        self.check_device_button.pack(side=LEFT)
         self._register(ttk.Label(top_row), "label_language").pack(side=LEFT, padx=(18, 4))
         language_selector = ttk.Combobox(
             top_row,
@@ -102,18 +104,25 @@ class SyncFilesApp:
         local_row.pack(fill=X, pady=4)
         self._register(ttk.Label(local_row), "label_local_folder").pack(side=LEFT)
         ttk.Entry(local_row, textvariable=self.local_root).pack(side=LEFT, fill=X, expand=True, padx=8)
-        self._register(ttk.Button(local_row, command=self.choose_local_folder), "button_choose").pack(side=RIGHT)
+        self.local_choose_button = self._register(ttk.Button(local_row, command=self.choose_local_folder), "button_choose")
+        self.local_choose_button.pack(side=RIGHT)
 
         phone_row = ttk.Frame(outer)
         phone_row.pack(fill=X, pady=4)
         self._register(ttk.Label(phone_row), "label_phone_folder").pack(side=LEFT)
         ttk.Entry(phone_row, textvariable=self.phone_root).pack(side=LEFT, fill=X, expand=True, padx=8)
-        self._register(ttk.Button(phone_row, command=self.open_phone_browser), "button_browse_phone").pack(side=RIGHT)
+        self.phone_browse_button = self._register(
+            ttk.Button(phone_row, command=self.open_phone_browser),
+            "button_browse_phone",
+        )
+        self.phone_browse_button.pack(side=RIGHT)
 
         actions = ttk.Frame(outer)
         actions.pack(fill=X, pady=8)
-        self._register(ttk.Button(actions, command=self.scan_differences), "button_scan").pack(side=LEFT)
-        self._register(ttk.Button(actions, command=self.start_sync), "button_start_sync").pack(side=LEFT, padx=8)
+        self.scan_button = self._register(ttk.Button(actions, command=self.scan_differences), "button_scan")
+        self.scan_button.pack(side=LEFT)
+        self.sync_button = self._register(ttk.Button(actions, command=self.start_sync), "button_start_sync")
+        self.sync_button.pack(side=LEFT, padx=8)
 
         self.notebook = ttk.Notebook(outer)
         self.notebook.pack(fill=BOTH, expand=True)
@@ -139,11 +148,15 @@ class SyncFilesApp:
         self._refresh_status()
 
     def choose_local_folder(self) -> None:
+        if self._warn_if_busy():
+            return
         selected = filedialog.askdirectory(title=self._tr("dialog_choose_local"))
         if selected:
             self.local_root.set(selected)
 
     def open_phone_browser(self) -> None:
+        if self._warn_if_busy():
+            return
         browser = Toplevel(self.root)
         browser.title(self._tr("dialog_choose_phone"))
         current = StringVar(value=self.phone_root.get() or "/sdcard")
@@ -165,6 +178,11 @@ class SyncFilesApp:
         def enter(_event: object | None = None) -> None:
             selection = listing.curselection()
             if not selection:
+                messagebox.showwarning(
+                    self._tr("dialog_no_phone_selection_title"),
+                    self._tr("dialog_no_phone_selection_message"),
+                    parent=browser,
+                )
                 return
             value = listing.get(selection[0])
             if value == "..":
@@ -185,6 +203,8 @@ class SyncFilesApp:
         load(current.get() or "/sdcard")
 
     def scan_differences(self) -> None:
+        if self._warn_if_busy():
+            return
         local = self.local_root.get()
         phone = self.phone_root.get()
         if not local or not phone:
@@ -273,6 +293,8 @@ class SyncFilesApp:
         ).pack(fill=X, padx=12, pady=4)
 
     def start_sync(self) -> None:
+        if self._warn_if_busy():
+            return
         if self.plan is None:
             messagebox.showwarning(self._tr("dialog_no_scan_title"), self._tr("dialog_no_scan_message"))
             return
@@ -294,6 +316,8 @@ class SyncFilesApp:
         self._log(self._tr("log_sync_complete", count=len(operations)))
 
     def _run_background(self, target: Callable[[], None]) -> None:
+        self._set_busy(True)
+
         def wrapped() -> None:
             try:
                 target()
@@ -301,6 +325,8 @@ class SyncFilesApp:
                 message = str(exc)
                 self._log(self._tr("log_error", message=message))
                 self.root.after(0, lambda: messagebox.showerror(self._tr("dialog_error_title"), message))
+            finally:
+                self.root.after(0, lambda: self._set_busy(False))
 
         threading.Thread(target=wrapped, daemon=True).start()
 
@@ -346,6 +372,24 @@ class SyncFilesApp:
 
     def _tr(self, key: str, **values: object) -> str:
         return text(key, self.language, **values)
+
+    def _set_busy(self, busy: bool) -> None:
+        self.busy = busy
+        state = "disabled" if busy else "normal"
+        for button in (
+            self.check_device_button,
+            self.local_choose_button,
+            self.phone_browse_button,
+            self.scan_button,
+            self.sync_button,
+        ):
+            button.configure(state=state)
+
+    def _warn_if_busy(self) -> bool:
+        if not self.busy:
+            return False
+        messagebox.showwarning(self._tr("dialog_busy_title"), self._tr("dialog_busy_message"))
+        return True
 
 
 def main() -> None:
