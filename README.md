@@ -1,6 +1,6 @@
 # SyncFiles
 
-SyncFiles is a Windows-first desktop helper for synchronizing one Android ADB folder with one local or external hard drive folder.
+SyncFiles is a Windows-first desktop helper for synchronizing one Android ADB folder with one local or external hard drive folder. The app starts in Chinese by default and can be switched between `中文` and `English` from the main window.
 
 It performs bidirectional fill-in synchronization:
 
@@ -27,9 +27,10 @@ python -m syncfiles
 
 1. Connect the Android phone through USB.
 2. Open SyncFiles with `python -m syncfiles`.
-3. Click **Check device**.
-4. Choose the hard drive folder with the folder picker.
-5. Browse the phone folder from `/sdcard`.
-6. Scan differences.
-7. Double-click conflicts and choose an action.
-8. Start sync after reviewing the preview.
+3. Use the language selector if you want to switch between `中文` and `English`.
+4. Click **检查设备** / **Check device**.
+5. Choose the hard drive folder with the folder picker.
+6. Browse the phone folder from `/sdcard`.
+7. Scan differences.
+8. Double-click conflicts and choose an action.
+9. Start sync after reviewing the preview.
