@@ -1,2 +1,253 @@
+from __future__ import annotations
+
+import queue
+import threading
+from collections.abc import Callable
+from pathlib import Path
+from tkinter import BOTH, END, LEFT, RIGHT, X, Listbox, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
+
+from syncfiles.adb import AdbClient
+from syncfiles.domain import (
+    ConflictAction,
+    ConflictDecision,
+    CopyOperation,
+    SourceSide,
+    SyncPlan,
+    build_sync_plan,
+    resolve_conflicts,
+)
+from syncfiles.executor import SyncExecutor
+from syncfiles.local_fs import scan_local_folder
+
+
+def build_operations_from_plan(
+    plan: SyncPlan,
+    conflict_choices: dict[str, ConflictAction],
+) -> list[CopyOperation]:
+    operations: list[CopyOperation] = []
+    operations.extend(
+        CopyOperation(item.relative_path, SourceSide.PHONE, SourceSide.LOCAL) for item in plan.phone_to_local
+    )
+    operations.extend(
+        CopyOperation(item.relative_path, SourceSide.LOCAL, SourceSide.PHONE) for item in plan.local_to_phone
+    )
+    decisions = {
+        path: ConflictDecision(relative_path=path, action=action)
+        for path, action in conflict_choices.items()
+    }
+    operations.extend(resolve_conflicts(plan.conflicts, decisions))
+    return operations
+
+
+class SyncFilesApp:
+    def __init__(self, root: Tk) -> None:
+        self.root = root
+        self.root.title("SyncFiles")
+        self.adb = AdbClient()
+        self.local_root = StringVar()
+        self.phone_root = StringVar(value="/sdcard")
+        self.status = StringVar(value="Device status: unchecked")
+        self.log_queue: queue.Queue[str] = queue.Queue()
+        self.plan: SyncPlan | None = None
+        self.conflict_choices: dict[str, ConflictAction] = {}
+        self._build_ui()
+        self.root.after(100, self._drain_log_queue)
+
+    def _build_ui(self) -> None:
+        outer = ttk.Frame(self.root, padding=12)
+        outer.pack(fill=BOTH, expand=True)
+
+        ttk.Label(outer, textvariable=self.status).pack(anchor="w", fill=X)
+        ttk.Button(outer, text="Check device", command=self.check_device).pack(anchor="w", pady=(4, 10))
+
+        local_row = ttk.Frame(outer)
+        local_row.pack(fill=X, pady=4)
+        ttk.Label(local_row, text="Hard drive folder").pack(side=LEFT)
+        ttk.Entry(local_row, textvariable=self.local_root).pack(side=LEFT, fill=X, expand=True, padx=8)
+        ttk.Button(local_row, text="Choose", command=self.choose_local_folder).pack(side=RIGHT)
+
+        phone_row = ttk.Frame(outer)
+        phone_row.pack(fill=X, pady=4)
+        ttk.Label(phone_row, text="Phone folder").pack(side=LEFT)
+        ttk.Entry(phone_row, textvariable=self.phone_root).pack(side=LEFT, fill=X, expand=True, padx=8)
+        ttk.Button(phone_row, text="Browse phone", command=self.open_phone_browser).pack(side=RIGHT)
+
+        actions = ttk.Frame(outer)
+        actions.pack(fill=X, pady=8)
+        ttk.Button(actions, text="Scan differences", command=self.scan_differences).pack(side=LEFT)
+        ttk.Button(actions, text="Start sync", command=self.start_sync).pack(side=LEFT, padx=8)
+
+        notebook = ttk.Notebook(outer)
+        notebook.pack(fill=BOTH, expand=True)
+        self.phone_to_local_list = Listbox(notebook)
+        self.local_to_phone_list = Listbox(notebook)
+        self.conflict_list = Listbox(notebook)
+        self.conflict_list.bind("<Double-Button-1>", self.choose_conflict_action)
+        notebook.add(self.phone_to_local_list, text="Phone -> hard drive")
+        notebook.add(self.local_to_phone_list, text="Hard drive -> phone")
+        notebook.add(self.conflict_list, text="Conflicts")
+
+        ttk.Label(outer, text="Log").pack(anchor="w", pady=(8, 0))
+        self.log_list = Listbox(outer, height=8)
+        self.log_list.pack(fill=BOTH, expand=False)
+
+    def check_device(self) -> None:
+        status = self.adb.get_device_status()
+        self.status.set(f"Device status: {status.message}")
+
+    def choose_local_folder(self) -> None:
+        selected = filedialog.askdirectory(title="Choose hard drive folder")
+        if selected:
+            self.local_root.set(selected)
+
+    def open_phone_browser(self) -> None:
+        browser = Toplevel(self.root)
+        browser.title("Choose phone folder")
+        current = StringVar(value=self.phone_root.get() or "/sdcard")
+        ttk.Label(browser, textvariable=current).pack(fill=X, padx=8, pady=8)
+        listing = Listbox(browser, width=80, height=20)
+        listing.pack(fill=BOTH, expand=True, padx=8, pady=8)
+
+        def load(path: str) -> None:
+            current.set(path)
+            listing.delete(0, END)
+            if path != "/sdcard":
+                listing.insert(END, "..")
+            try:
+                for directory in self.adb.list_directories(path):
+                    listing.insert(END, directory)
+            except Exception as exc:
+                messagebox.showerror("ADB error", str(exc))
+
+        def enter(_event: object | None = None) -> None:
+            selection = listing.curselection()
+            if not selection:
+                return
+            value = listing.get(selection[0])
+            if value == "..":
+                parent = current.get().rstrip("/").rsplit("/", 1)[0] or "/sdcard"
+                load(parent if parent.startswith("/sdcard") else "/sdcard")
+            else:
+                load(value)
+
+        def choose() -> None:
+            self.phone_root.set(current.get())
+            browser.destroy()
+
+        listing.bind("<Double-Button-1>", enter)
+        buttons = ttk.Frame(browser)
+        buttons.pack(fill=X, padx=8, pady=8)
+        ttk.Button(buttons, text="Open", command=enter).pack(side=LEFT)
+        ttk.Button(buttons, text="Choose this folder", command=choose).pack(side=RIGHT)
+        load(current.get() or "/sdcard")
+
+    def scan_differences(self) -> None:
+        local = self.local_root.get()
+        phone = self.phone_root.get()
+        if not local or not phone:
+            messagebox.showwarning("Missing folders", "Choose both folders before scanning.")
+            return
+        self._run_background(lambda: self._scan_worker(Path(local), phone))
+
+    def _scan_worker(self, local: Path, phone: str) -> None:
+        self._log("Scanning hard drive folder...")
+        local_files = scan_local_folder(local)
+        self._log("Scanning phone folder...")
+        phone_files = self.adb.scan_phone_folder(phone)
+        self.plan = build_sync_plan(phone_files=phone_files, local_files=local_files)
+        self.conflict_choices = {conflict.relative_path: ConflictAction.SKIP for conflict in self.plan.conflicts}
+        self.root.after(0, self._render_plan)
+
+    def _render_plan(self) -> None:
+        self.phone_to_local_list.delete(0, END)
+        self.local_to_phone_list.delete(0, END)
+        self.conflict_list.delete(0, END)
+        if self.plan is None:
+            return
+        for item in self.plan.phone_to_local:
+            self.phone_to_local_list.insert(END, item.relative_path)
+        for item in self.plan.local_to_phone:
+            self.local_to_phone_list.insert(END, item.relative_path)
+        for conflict in self.plan.conflicts:
+            action = self.conflict_choices.get(conflict.relative_path, ConflictAction.SKIP)
+            self.conflict_list.insert(END, f"{conflict.relative_path} [{action.value}]")
+        self._log(
+            f"Scan complete: {len(self.plan.phone_to_local)} phone-to-hard-drive, "
+            f"{len(self.plan.local_to_phone)} hard-drive-to-phone, {len(self.plan.conflicts)} conflicts."
+        )
+
+    def choose_conflict_action(self, _event: object | None = None) -> None:
+        if self.plan is None:
+            return
+        selection = self.conflict_list.curselection()
+        if not selection:
+            return
+        conflict = self.plan.conflicts[selection[0]]
+        window = Toplevel(self.root)
+        window.title("Conflict action")
+        ttk.Label(window, text=conflict.relative_path).pack(fill=X, padx=12, pady=8)
+
+        def choose(action: ConflictAction) -> None:
+            self.conflict_choices[conflict.relative_path] = action
+            window.destroy()
+            self._render_plan()
+
+        ttk.Button(window, text="Use phone version", command=lambda: choose(ConflictAction.USE_PHONE)).pack(
+            fill=X,
+            padx=12,
+            pady=4,
+        )
+        ttk.Button(window, text="Use hard drive version", command=lambda: choose(ConflictAction.USE_LOCAL)).pack(
+            fill=X,
+            padx=12,
+            pady=4,
+        )
+        ttk.Button(window, text="Keep both", command=lambda: choose(ConflictAction.KEEP_BOTH)).pack(
+            fill=X,
+            padx=12,
+            pady=4,
+        )
+        ttk.Button(window, text="Skip", command=lambda: choose(ConflictAction.SKIP)).pack(fill=X, padx=12, pady=4)
+
+    def start_sync(self) -> None:
+        if self.plan is None:
+            messagebox.showwarning("No scan", "Scan differences before syncing.")
+            return
+        if not messagebox.askyesno("Confirm sync", "Run the listed copy operations now?"):
+            return
+        self._run_background(lambda: self._sync_worker(Path(self.local_root.get()), self.phone_root.get()))
+
+    def _sync_worker(self, local: Path, phone: str) -> None:
+        if self.plan is None:
+            return
+        operations = build_operations_from_plan(self.plan, self.conflict_choices)
+        executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
+        for line in executor.execute_operations(operations):
+            self._log(line)
+        self._log(f"Sync complete: {len(operations)} operations attempted.")
+
+    def _run_background(self, target: Callable[[], None]) -> None:
+        def wrapped() -> None:
+            try:
+                target()
+            except Exception as exc:
+                message = str(exc)
+                self._log(f"Error: {message}")
+                self.root.after(0, lambda: messagebox.showerror("SyncFiles error", message))
+
+        threading.Thread(target=wrapped, daemon=True).start()
+
+    def _log(self, message: str) -> None:
+        self.log_queue.put(message)
+
+    def _drain_log_queue(self) -> None:
+        while not self.log_queue.empty():
+            self.log_list.insert(END, self.log_queue.get())
+            self.log_list.yview_moveto(1)
+        self.root.after(100, self._drain_log_queue)
+
+
 def main() -> None:
-    print("SyncFiles desktop app is not wired yet.")
+    root = Tk()
+    SyncFilesApp(root)
+    root.mainloop()
