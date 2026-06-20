@@ -32,6 +32,26 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "设备状态：",
         Language.ENGLISH: "Device status: ",
     },
+    "device_adb_missing": {
+        Language.CHINESE: "未找到 ADB，请安装 Android Platform Tools 并加入 PATH。",
+        Language.ENGLISH: "ADB is not installed or not on PATH.",
+    },
+    "device_no_device": {
+        Language.CHINESE: "未连接 Android 设备。",
+        Language.ENGLISH: "No Android device is connected.",
+    },
+    "device_unauthorized": {
+        Language.CHINESE: "请在手机上允许 USB 调试授权。",
+        Language.ENGLISH: "Authorize USB debugging on the phone.",
+    },
+    "device_multiple": {
+        Language.CHINESE: "请只连接一台 Android 设备。",
+        Language.ENGLISH: "Connect exactly one Android device.",
+    },
+    "device_ready": {
+        Language.CHINESE: "已连接一台授权 Android 设备。",
+        Language.ENGLISH: "One authorized Android device is ready.",
+    },
     "label_language": {
         Language.CHINESE: "语言",
         Language.ENGLISH: "Language",

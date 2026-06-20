@@ -1,4 +1,4 @@
-from syncfiles.app import build_operations_from_plan
+from syncfiles.app import build_operations_from_plan, default_language_label
 from syncfiles.domain import (
     ConflictAction,
     FileRecord,
@@ -33,3 +33,7 @@ def test_build_operations_from_plan_includes_missing_files_and_conflict_choices(
         ("local-only.txt", SourceSide.LOCAL, SourceSide.PHONE),
         ("conflict.txt", SourceSide.LOCAL, SourceSide.PHONE),
     ]
+
+
+def test_default_language_label_is_chinese() -> None:
+    assert default_language_label() == "中文"
