@@ -362,7 +362,7 @@ class SyncFilesApp:
             self.local_to_phone_list.insert(END, item.relative_path)
         for conflict in self.plan.conflicts:
             action = self.conflict_choices.get(conflict.relative_path, ConflictAction.SKIP)
-            self.conflict_list.insert(END, f"{conflict.relative_path} [{conflict_action_label(action, self.language)}]")
+            self.conflict_list.insert(END, f"{conflict.relative_path} [{self._conflict_action_label(action)}]")
         self._log(
             self._tr(
                 "log_scan_complete",
@@ -390,7 +390,7 @@ class SyncFilesApp:
 
         ttk.Button(
             window,
-            text=conflict_action_label(ConflictAction.USE_PHONE, self.language),
+            text=self._conflict_action_label(ConflictAction.USE_PHONE),
             command=lambda: choose(ConflictAction.USE_PHONE),
         ).pack(
             fill=X,
@@ -399,7 +399,7 @@ class SyncFilesApp:
         )
         ttk.Button(
             window,
-            text=conflict_action_label(ConflictAction.USE_LOCAL, self.language),
+            text=self._conflict_action_label(ConflictAction.USE_LOCAL),
             command=lambda: choose(ConflictAction.USE_LOCAL),
         ).pack(
             fill=X,
@@ -408,7 +408,7 @@ class SyncFilesApp:
         )
         ttk.Button(
             window,
-            text=conflict_action_label(ConflictAction.KEEP_BOTH, self.language),
+            text=self._conflict_action_label(ConflictAction.KEEP_BOTH),
             command=lambda: choose(ConflictAction.KEEP_BOTH),
         ).pack(
             fill=X,
@@ -417,7 +417,7 @@ class SyncFilesApp:
         )
         ttk.Button(
             window,
-            text=conflict_action_label(ConflictAction.SKIP, self.language),
+            text=self._conflict_action_label(ConflictAction.SKIP),
             command=lambda: choose(ConflictAction.SKIP),
         ).pack(fill=X, padx=12, pady=4)
 
@@ -600,6 +600,15 @@ class SyncFilesApp:
 
     def _sync_mode_from_label(self, label: str) -> SyncMode:
         return SyncMode.PHONE if label == self._tr("sync_mode_phone") else SyncMode.HARD_DRIVE
+
+    def _conflict_action_label(self, action: ConflictAction) -> str:
+        if self.sync_mode is SyncMode.PHONE:
+            return conflict_action_label(action, self.language)
+        if action is ConflictAction.USE_PHONE:
+            return self._tr("conflict_use_right")
+        if action is ConflictAction.USE_LOCAL:
+            return self._tr("conflict_use_left")
+        return conflict_action_label(action, self.language)
 
     def _refresh_mode_ui(self) -> None:
         self.mode_label.set(self._sync_mode_label(self.sync_mode))

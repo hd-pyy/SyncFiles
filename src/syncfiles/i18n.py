@@ -276,6 +276,22 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "失败",
         Language.ENGLISH: "Failed",
     },
+    "conflict_use_left": {
+        Language.CHINESE: "使用左侧版本",
+        Language.ENGLISH: "Use left version",
+    },
+    "conflict_use_right": {
+        Language.CHINESE: "使用右侧版本",
+        Language.ENGLISH: "Use right version",
+    },
+    "conflict_use_phone": {
+        Language.CHINESE: "使用手机版本",
+        Language.ENGLISH: "Use phone version",
+    },
+    "conflict_use_hard_drive": {
+        Language.CHINESE: "使用硬盘版本",
+        Language.ENGLISH: "Use hard drive version",
+    },
 }
 
 CONFLICT_ACTION_LABELS: dict[ConflictAction, dict[Language, str]] = {

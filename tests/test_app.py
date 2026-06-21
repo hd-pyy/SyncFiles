@@ -250,6 +250,20 @@ def test_render_failed_progress_does_not_show_done() -> None:
         root.destroy()
 
 
+def test_conflict_action_labels_follow_sync_mode() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+
+        assert app._conflict_action_label(ConflictAction.USE_PHONE) == text("conflict_use_right", app.language)
+
+        app.sync_mode = SyncMode.PHONE
+        assert app._conflict_action_label(ConflictAction.USE_PHONE) == text("conflict_use_phone", app.language)
+    finally:
+        root.destroy()
+
+
 def test_scan_worker_does_not_touch_progressbar_from_worker_thread(tmp_path: Path) -> None:
     root = tk.Tk()
     root.withdraw()
