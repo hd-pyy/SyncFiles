@@ -18,7 +18,7 @@ from syncfiles.domain import (
     build_sync_plan,
     resolve_conflicts,
 )
-from syncfiles.executor import SyncExecutor
+from syncfiles.executor import OperationCancelled, SyncExecutor
 from syncfiles.i18n import (
     DEFAULT_LANGUAGE,
     LANGUAGE_BY_LABEL,
@@ -100,6 +100,11 @@ class SyncFilesApp:
         self.root = root
         self.language = DEFAULT_LANGUAGE
         self.root.title(self._tr("app_title"))
+        # Pin an initial geometry and a minimum size so a long filename in the
+        # diff/log listboxes can't push the window wider — the listboxes are
+        # created with width=1 and stretch via pack(fill=BOTH).
+        self.root.geometry("620x780")
+        self.root.minsize(520, 600)
         self.adb = AdbClient()
         self.local_root = StringVar()
         self.phone_root = StringVar(value="/sdcard")
@@ -116,11 +121,20 @@ class SyncFilesApp:
         self.conflict_choices: dict[str, ConflictAction] = {}
         self.device_status: DeviceStatus | None = None
         self.busy = False
+        # Worker threads poll this between every cancellable step. Cleared by
+        # _run_background and set by request_cancel; the cancel button is the
+        # only thing that flips it during a run.
+        self._cancel_event = threading.Event()
         self.translatable_widgets: list[tuple[object, str]] = []
         self.tab_text_keys: list[tuple[object, str]] = []
         self._build_ui()
         self.root.after(100, self._drain_log_queue)
         self.root.after(100, self._drain_progress_queue)
+        # Wake the adb-server daemon right after the UI is up so the first
+        # "check device" or "browse phone" pays the warm ~30ms cost instead
+        # of the cold ~5s one. Fire-and-forget: failures are silently
+        # swallowed and the real adb call will surface the error.
+        threading.Thread(target=self.adb.prewarm_server, daemon=True).start()
 
     def _make_scrolled_list(self, parent: object) -> Listbox:
         """Build a Listbox paired with a vertical Scrollbar.
@@ -131,7 +145,10 @@ class SyncFilesApp:
         to ``ttk.Notebook.add``.
         """
         container = ttk.Frame(parent)
-        listbox = Listbox(container, exportselection=False)
+        # width=1 keeps the listbox from requesting space based on its longest
+        # row — pack(fill=BOTH, expand=True) below still stretches it to fill
+        # the container, but a long filename can no longer push the root wider.
+        listbox = Listbox(container, exportselection=False, width=1)
         scrollbar = ttk.Scrollbar(container, orient=VERTICAL, command=listbox.yview)
         listbox.configure(yscrollcommand=scrollbar.set)
         listbox.pack(side=LEFT, fill=BOTH, expand=True)
@@ -176,7 +193,9 @@ class SyncFilesApp:
         local_row.pack(fill=X, pady=4)
         self.first_folder_label = self._register(ttk.Label(local_row), "label_left_folder")
         self.first_folder_label.pack(side=LEFT)
-        ttk.Entry(local_row, textvariable=self.local_root).pack(side=LEFT, fill=X, expand=True, padx=8)
+        # width=1 prevents a long path from inflating the entry's requested
+        # width; pack(expand=True) still gives it all the slack space.
+        ttk.Entry(local_row, textvariable=self.local_root, width=1).pack(side=LEFT, fill=X, expand=True, padx=8)
         self.local_choose_button = self._register(ttk.Button(local_row, command=self.choose_local_folder), "button_choose")
         self.local_choose_button.pack(side=RIGHT)
 
@@ -184,7 +203,7 @@ class SyncFilesApp:
         phone_row.pack(fill=X, pady=4)
         self.second_folder_label = self._register(ttk.Label(phone_row), "label_right_folder")
         self.second_folder_label.pack(side=LEFT)
-        ttk.Entry(phone_row, textvariable=self.phone_root).pack(side=LEFT, fill=X, expand=True, padx=8)
+        ttk.Entry(phone_row, textvariable=self.phone_root, width=1).pack(side=LEFT, fill=X, expand=True, padx=8)
         self.second_choose_button = self._register(
             ttk.Button(phone_row, command=self.choose_second_folder),
             "button_choose",
@@ -198,6 +217,11 @@ class SyncFilesApp:
         self.scan_button.pack(side=LEFT)
         self.sync_button = self._register(ttk.Button(actions, command=self.start_sync), "button_start_sync")
         self.sync_button.pack(side=LEFT, padx=8)
+        # Cancel sits next to Start sync but is only enabled while a worker is
+        # running — _set_busy is the single source of truth for its state.
+        self.cancel_button = self._register(ttk.Button(actions, command=self.request_cancel), "button_cancel")
+        self.cancel_button.pack(side=LEFT)
+        self.cancel_button.configure(state="disabled")
 
         progress_box = ttk.Frame(outer)
         progress_box.pack(fill=X, pady=(0, 8))
@@ -240,12 +264,29 @@ class SyncFilesApp:
         self._refresh_mode_ui()
 
         self._register(ttk.Label(outer), "label_log").pack(anchor="w", pady=(8, 0))
-        self.log_list = Listbox(outer, height=8)
-        self.log_list.pack(fill=BOTH, expand=False)
+        # Mirror _make_scrolled_list: pair the log Listbox with a vertical
+        # Scrollbar inside a Frame so long history is reachable. width=1 keeps
+        # a long log line from widening the root; fill=BOTH lets it grow with
+        # the window instead.
+        log_container = ttk.Frame(outer)
+        log_container.pack(fill=BOTH, expand=False)
+        self.log_list = Listbox(log_container, height=8, width=1)
+        log_scrollbar = ttk.Scrollbar(log_container, orient=VERTICAL, command=self.log_list.yview)
+        self.log_list.configure(yscrollcommand=log_scrollbar.set)
+        self.log_list.pack(side=LEFT, fill=BOTH, expand=True)
+        log_scrollbar.pack(side=RIGHT, fill=Y)
 
     def check_device(self) -> None:
+        if self._warn_if_busy():
+            return
+        self._run_background(self._check_device_worker)
+
+    def _check_device_worker(self) -> None:
+        # adb startup is slow (cold process spawn, ~1-2s). Run it on a worker
+        # thread so the UI stays responsive; the result is delivered to the
+        # main thread via _set_busy(False) -> _refresh_mode_ui.
         self.device_status = self.adb.get_device_status()
-        self._refresh_status()
+        self.root.after(0, self._refresh_status)
 
     def choose_local_folder(self) -> None:
         if self._warn_if_busy():
@@ -282,19 +323,66 @@ class SyncFilesApp:
         listing.configure(yscrollcommand=scrollbar.set)
         listing.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
+        status_var = StringVar(value=self._tr("phone_browser_loading"))
+        status_label = ttk.Label(browser, textvariable=status_var, foreground="gray")
+        status_label.pack(fill=X, padx=8, pady=(0, 4))
 
-        def load(path: str) -> None:
+        # Per-browser reentrancy guard: prevents double-clicks and rapid
+        # "Open" presses from queueing overlapping adb calls.
+        loading = {"value": False}
+
+        def show_loading(message: str) -> None:
+            listing.delete(0, END)
+            status_var.set(message)
+            open_button.configure(state="disabled")
+            choose_button.configure(state="disabled")
+
+        def show_results(path: str, directories: list[str]) -> None:
             current.set(path)
             listing.delete(0, END)
             if path != "/sdcard":
                 listing.insert(END, "..")
-            try:
-                for directory in self.adb.list_directories(path):
-                    listing.insert(END, directory)
-            except Exception as exc:
-                messagebox.showerror(self._tr("dialog_adb_error"), str(exc))
+            for directory in directories:
+                listing.insert(END, directory)
+            status_var.set("")
+            open_button.configure(state="normal")
+            choose_button.configure(state="normal")
+
+        def load(path: str) -> None:
+            if loading["value"]:
+                return
+            loading["value"] = True
+            show_loading(self._tr("phone_browser_loading"))
+
+            def worker() -> list[str] | None:
+                try:
+                    return self.adb.list_directories(path)
+                except Exception as exc:
+                    self.root.after(
+                        0,
+                        lambda: messagebox.showerror(
+                            self._tr("dialog_adb_error"),
+                            str(exc),
+                            parent=browser,
+                        ),
+                    )
+                    return None
+                finally:
+                    self.root.after(0, _finish_load)
+
+            def _finish_load() -> None:
+                loading["value"] = False
+
+            def runner() -> None:
+                result = worker()
+                if result is not None:
+                    self.root.after(0, lambda: show_results(path, result))
+
+            threading.Thread(target=runner, daemon=True).start()
 
         def enter(_event: object | None = None) -> None:
+            if loading["value"]:
+                return
             selection = listing.curselection()
             if not selection:
                 messagebox.showwarning(
@@ -311,6 +399,8 @@ class SyncFilesApp:
                 load(value)
 
         def choose() -> None:
+            if loading["value"]:
+                return
             selection = listing.curselection()
             selected_value = listing.get(selection[0]) if selection else None
             self.phone_root.set(phone_folder_to_choose(current.get(), selected_value))
@@ -319,8 +409,12 @@ class SyncFilesApp:
         listing.bind("<Double-Button-1>", enter)
         buttons = ttk.Frame(browser)
         buttons.pack(fill=X, padx=8, pady=8)
-        ttk.Button(buttons, text=self._tr("button_open"), command=enter).pack(side=LEFT)
-        ttk.Button(buttons, text=self._tr("button_choose_this_folder"), command=choose).pack(side=RIGHT)
+        open_button = ttk.Button(buttons, text=self._tr("button_open"), command=enter)
+        open_button.pack(side=LEFT)
+        choose_button = ttk.Button(
+            buttons, text=self._tr("button_choose_this_folder"), command=choose
+        )
+        choose_button.pack(side=RIGHT)
         load(current.get() or "/sdcard")
 
     def scan_differences(self) -> None:
@@ -350,13 +444,17 @@ class SyncFilesApp:
             current_path=self._tr("progress_current_local"),
             mode=ProgressMode.INDETERMINATE,
         )
-        local_files = scan_local_folder(local)
+        local_files = scan_local_folder(local, is_cancelled=self._cancel_event.is_set)
         self.progress.advance(
             current_path=self._tr(
                 "progress_current_phone" if self.sync_mode is SyncMode.PHONE else "progress_current_right"
             )
         )
+        if self._cancel_event.is_set():
+            raise OperationCancelled
         second_files = self._scan_second_folder(phone)
+        if self._cancel_event.is_set():
+            raise OperationCancelled
         self.plan = build_sync_plan(phone_files=second_files, local_files=local_files)
         self.conflict_choices = {
             conflict.relative_path: ConflictAction.SKIP for conflict in self.plan.conflicts
@@ -369,7 +467,7 @@ class SyncFilesApp:
             self._log(self._tr("log_scanning_phone"))
             return self.adb.scan_phone_folder(second)
         self._log(self._tr("log_scanning_right"))
-        records = scan_local_folder(Path(second))
+        records = scan_local_folder(Path(second), is_cancelled=self._cancel_event.is_set)
         return [
             FileRecord(
                 relative_path=record.relative_path,
@@ -393,9 +491,12 @@ class SyncFilesApp:
         for conflict in self.plan.conflicts:
             action = self.conflict_choices.get(conflict.relative_path, ConflictAction.SKIP)
             self.conflict_list.insert(END, f"{conflict.relative_path} [{self._conflict_action_label(action)}]")
+        scan_complete_key = (
+            "log_scan_complete" if self.sync_mode is SyncMode.PHONE else "log_scan_complete_hard_drive"
+        )
         self._log(
             self._tr(
-                "log_scan_complete",
+                scan_complete_key,
                 phone_to_local=len(self.plan.phone_to_local),
                 local_to_phone=len(self.plan.local_to_phone),
                 conflicts=len(self.plan.conflicts),
@@ -483,10 +584,12 @@ class SyncFilesApp:
         )
         try:
             completed_count = 0
+            completed_operations: list[CopyOperation] = []
 
-            def hook(_operation: CopyOperation, _elapsed: float) -> None:
+            def hook(operation: CopyOperation, _elapsed: float) -> None:
                 nonlocal completed_count
                 completed_count += 1
+                completed_operations.append(operation)
                 next_path = (
                     operations[completed_count].relative_path
                     if completed_count < len(operations)
@@ -498,12 +601,18 @@ class SyncFilesApp:
                 executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
             else:
                 executor = LocalSyncExecutor(left_root=local, right_root=Path(phone))
-            executor.execute_operations(operations, on_operation_complete=hook)
-            for operation in operations:
-                if operation.source_side is SourceSide.LOCAL and operation.destination_side is SourceSide.PHONE:
-                    self._log(self._tr("log_pushed", path=operation.relative_path))
-                elif operation.source_side is SourceSide.PHONE and operation.destination_side is SourceSide.LOCAL:
-                    self._log(self._tr("log_pulled", path=operation.relative_path))
+            try:
+                executor.execute_operations(
+                    operations,
+                    on_operation_complete=hook,
+                    is_cancelled=self._cancel_event.is_set,
+                )
+            except OperationCancelled:
+                self._log_executed_operations(completed_operations)
+                self._log(self._tr("log_sync_cancelled", count=len(completed_operations)))
+                self.progress.cancel()
+                return
+            self._log_executed_operations(operations)
             self._log(self._tr("log_sync_complete", count=len(operations)))
         except Exception:
             self.progress.fail()
@@ -511,12 +620,29 @@ class SyncFilesApp:
         else:
             self.progress.succeed()
 
+    def _log_executed_operations(self, operations: list[CopyOperation]) -> None:
+        push_key = "log_pushed" if self.sync_mode is SyncMode.PHONE else "log_copied_left_to_right"
+        pull_key = "log_pulled" if self.sync_mode is SyncMode.PHONE else "log_copied_right_to_left"
+        for operation in operations:
+            if operation.source_side is SourceSide.LOCAL and operation.destination_side is SourceSide.PHONE:
+                self._log(self._tr(push_key, path=operation.relative_path))
+            elif operation.source_side is SourceSide.PHONE and operation.destination_side is SourceSide.LOCAL:
+                self._log(self._tr(pull_key, path=operation.relative_path))
+
     def _run_background(self, target: Callable[[], None]) -> None:
+        self._cancel_event.clear()
         self._set_busy(True)
 
         def wrapped() -> None:
             try:
                 target()
+            except OperationCancelled:
+                # Workers may raise this before reaching their own cancel
+                # handler (e.g. scan_local_folder bailing out). Treat it the
+                # same way _sync_worker does: mark the run cancelled, log it,
+                # and skip the error dialog.
+                self.progress.cancel()
+                self._log(self._tr("log_scan_cancelled"))
             except Exception as exc:
                 message = str(exc)
                 self.progress.fail()
@@ -526,6 +652,17 @@ class SyncFilesApp:
                 self.root.after(0, lambda: self._set_busy(False))
 
         threading.Thread(target=wrapped, daemon=True).start()
+
+    def request_cancel(self) -> None:
+        """Signal any running scan or sync worker to stop at its next check.
+
+        Safe to call when no worker is running — the event is cleared at
+        every ``_run_background`` start, so setting it now is harmless.
+        """
+        if not self.busy:
+            return
+        self._cancel_event.set()
+        self.cancel_button.configure(state="disabled")
 
     def _log(self, message: str) -> None:
         self.log_queue.put(message)
@@ -571,6 +708,17 @@ class SyncFilesApp:
             else:
                 self.progress_current_label.configure(text="")
             self.progress_bar.configure(value=snapshot.fraction)
+            return
+        if snapshot.state is ProgressState.CANCELLED:
+            # Cancellation is a terminal "nothing to show" state, like IDLE —
+            # not SUCCEEDED (value=1 asserts completion that never happened)
+            # and not FAILED (value=fraction points at where the run died).
+            # The completed count is preserved in the log line; the bar
+            # itself should not look like a paused run.
+            self.progress_status_label.configure(text=self._tr("progress_cancelled"))
+            self.progress_eta_label.configure(text="")
+            self.progress_current_label.configure(text="")
+            self.progress_bar.configure(value=0)
             return
         self.progress_status_label.configure(
             text=self._tr("progress_x_of_n", index=snapshot.completed, total=snapshot.total)
@@ -722,6 +870,8 @@ class SyncFilesApp:
             self.sync_button,
         ):
             button.configure(state=state)
+        # Cancel is the inverse — only meaningful mid-run.
+        self.cancel_button.configure(state="normal" if busy else "disabled")
         self._refresh_mode_ui()
 
     def _warn_if_busy(self) -> bool:

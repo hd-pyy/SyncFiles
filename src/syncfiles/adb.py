@@ -1,15 +1,55 @@
 from __future__ import annotations
 
+import os
 import shlex
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import Path
 from typing import Callable
 
-from syncfiles.domain import FileRecord, SourceSide
+from syncfiles.domain import AdbError, FileRecord, SourceSide
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+
+
+def resolve_adb_path() -> str:
+    """Return the adb executable to invoke, probing in this order:
+
+    1. ``SYNCFILES_ADB`` environment variable (escape hatch for power users).
+    2. ``adb`` on ``PATH`` — honors a system / user-installed copy and lets
+       users upgrade adb independently of the bundled exe.
+    3. ``adb`` / ``adb.exe`` sitting next to the running executable — handy
+       for a portable drop-in: copy a newer platform-tools here to override.
+    4. The bundled fallback shipped inside the package / frozen exe.
+    """
+    override = os.environ.get("SYNCFILES_ADB")
+    if override:
+        return override
+
+    on_path = shutil.which("adb")
+    if on_path:
+        return on_path
+
+    executable_dir = Path(getattr(sys, "executable", __file__)).resolve().parent
+    for candidate in ("adb.exe", "adb"):
+        sibling = executable_dir / candidate
+        if sibling.is_file():
+            return str(sibling)
+
+    bundled_name = "adb.exe" if os.name == "nt" else "adb"
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass is not None:
+        bundled = Path(meipass) / "adb_fallback" / bundled_name
+        if bundled.is_file():
+            return str(bundled)
+    bundled = Path(__file__).resolve().parent / "adb_fallback" / bundled_name
+    if bundled.is_file():
+        return str(bundled)
+
+    return "adb"
 
 
 class DeviceState(StrEnum):
@@ -29,13 +69,24 @@ class DeviceStatus:
 
 
 class AdbClient:
-    def __init__(self, adb_path: str = "adb", runner: Runner = subprocess.run) -> None:
-        self.adb_path = adb_path
+    def __init__(self, adb_path: str | None = None, runner: Runner = subprocess.run) -> None:
+        self.adb_path = adb_path if adb_path is not None else resolve_adb_path()
         self.runner = runner
 
-    def get_device_status(self) -> DeviceStatus:
+    def prewarm_server(self) -> None:
+        """Best-effort: wake up the adb server daemon so the first real call
+        doesn't pay the ~5s cold-start tax on a machine that has never run
+        adb. Safe to call from any thread; ignores all errors because the
+        real adb call right after this will surface the actual failure.
+        """
         if self.adb_path == "adb" and shutil.which("adb") is None and self.runner is subprocess.run:
-            return DeviceStatus(DeviceState.ADB_MISSING, "ADB is not installed or not on PATH.")
+            return
+        try:
+            self._run([self.adb_path, "start-server"], check=False)
+        except (FileNotFoundError, OSError):
+            pass
+
+    def get_device_status(self) -> DeviceStatus:
         try:
             result = self._run([self.adb_path, "devices"], check=False)
         except FileNotFoundError:
@@ -58,15 +109,21 @@ class AdbClient:
 
     def list_directories(self, phone_path: str) -> list[str]:
         find_root = _find_root(phone_path)
-        result = self._run(
-            [self.adb_path, "shell", "find", find_root, "-maxdepth", "1", "-mindepth", "1", "-type", "d"],
-            check=True,
-        )
+        try:
+            result = self._run(
+                [self.adb_path, "shell", "find", find_root, "-maxdepth", "1", "-mindepth", "1", "-type", "d"],
+                check=True,
+            )
+        except FileNotFoundError as exc:
+            raise AdbError("ADB is not installed or not on PATH.") from exc
         return sorted(line.strip() for line in result.stdout.splitlines() if line.strip())
 
     def scan_phone_folder(self, phone_root: str) -> list[FileRecord]:
         find_root = _find_root(phone_root)
-        result = self._run([self.adb_path, "shell", _scan_files_command(find_root)], check=True)
+        try:
+            result = self._run([self.adb_path, "shell", _scan_files_command(find_root)], check=True)
+        except FileNotFoundError as exc:
+            raise AdbError("ADB is not installed or not on PATH.") from exc
         records: list[FileRecord] = []
         for line in result.stdout.splitlines():
             if not line.strip():
@@ -83,20 +140,32 @@ class AdbClient:
         return sorted(records, key=lambda record: record.relative_path)
 
     def push(self, local_path: str, phone_path: str) -> None:
-        self._run([self.adb_path, "push", local_path, phone_path], check=True)
+        try:
+            self._run([self.adb_path, "push", local_path, phone_path], check=True)
+        except FileNotFoundError as exc:
+            raise AdbError("ADB is not installed or not on PATH.") from exc
 
     def pull(self, phone_path: str, local_path: str) -> None:
-        self._run([self.adb_path, "pull", phone_path, local_path], check=True)
+        try:
+            self._run([self.adb_path, "pull", phone_path, local_path], check=True)
+        except FileNotFoundError as exc:
+            raise AdbError("ADB is not installed or not on PATH.") from exc
 
     def _run(self, command: list[str], *, check: bool) -> subprocess.CompletedProcess[str]:
-        return self.runner(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=check,
-        )
+        kwargs: dict[str, object] = {
+            "capture_output": True,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+            "check": check,
+        }
+        # Suppress the black cmd window that would otherwise flash whenever
+        # we spawn the console-subsystem adb.exe from a windowed (GUI) app.
+        # Gated on the real subprocess.run runner so test doubles that don't
+        # accept creationflags keep working unchanged.
+        if os.name == "nt" and self.runner is subprocess.run:
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        return self.runner(command, **kwargs)
 
 
 def _parse_devices(output: str) -> list[tuple[str, str]]:

@@ -38,3 +38,32 @@ python -m syncfiles
 7. Scan differences.
 8. Double-click conflicts and choose an action.
 9. Start sync after reviewing the preview.
+
+## Building a Windows Distribution
+
+The packaged exe bundles `adb.exe` and its required DLLs, so end users do not
+need to install platform-tools.
+
+1. Stage the ADB fallback (one-time, not checked in):
+
+   ```powershell
+   mkdir src\syncfiles\adb_fallback
+   copy "<path-to-platform-tools>\adb.exe"              src\syncfiles\adb_fallback\
+   copy "<path-to-platform-tools>\AdbWinApi.dll"        src\syncfiles\adb_fallback\
+   copy "<path-to-platform-tools>\AdbWinUsbApi.dll"     src\syncfiles\adb_fallback\
+   copy "<path-to-platform-tools>\libwinpthread-1.dll"  src\syncfiles\adb_fallback\
+   ```
+
+2. Build:
+
+   ```powershell
+   .venv\Scripts\python -m pip install pyinstaller
+   .venv\Scripts\pyinstaller --noconfirm SyncFiles.spec
+   ```
+
+3. The result is a single `dist\SyncFiles.exe` (~20 MB) that contains
+   Python, Tcl/Tk, the syncfiles package, and `adb.exe` plus its DLLs.
+   Ship just that one file to end users.
+
+At runtime `syncfiles.adb.resolve_adb_path` looks for adb in this order:
+`SYNCFILES_ADB` env var → `PATH` → adb next to the exe → bundled fallback.

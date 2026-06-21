@@ -104,6 +104,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "开始同步",
         Language.ENGLISH: "Start sync",
     },
+    "button_cancel": {
+        Language.CHINESE: "取消",
+        Language.ENGLISH: "Cancel",
+    },
     "tab_phone_to_local": {
         Language.CHINESE: "手机 -> 硬盘",
         Language.ENGLISH: "Phone -> hard drive",
@@ -176,6 +180,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "请先在列表中选择一个手机文件夹。",
         Language.ENGLISH: "Select a phone folder from the list first.",
     },
+    "phone_browser_loading": {
+        Language.CHINESE: "正在加载...",
+        Language.ENGLISH: "Loading...",
+    },
     "log_scanning_local": {
         Language.CHINESE: "正在扫描硬盘文件夹...",
         Language.ENGLISH: "Scanning hard drive folder...",
@@ -195,6 +203,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "log_scan_complete": {
         Language.CHINESE: "扫描完成：{phone_to_local} 个手机到硬盘，{local_to_phone} 个硬盘到手机，{conflicts} 个冲突。",
         Language.ENGLISH: "Scan complete: {phone_to_local} phone-to-hard-drive, {local_to_phone} hard-drive-to-phone, {conflicts} conflicts.",
+    },
+    "log_scan_complete_hard_drive": {
+        Language.CHINESE: "扫描完成：{phone_to_local} 个右侧到左侧，{local_to_phone} 个左侧到右侧，{conflicts} 个冲突。",
+        Language.ENGLISH: "Scan complete: {phone_to_local} right-to-left, {local_to_phone} left-to-right, {conflicts} conflicts.",
     },
     "dialog_conflict_action": {
         Language.CHINESE: "冲突处理",
@@ -231,6 +243,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "log_pulled": {
         Language.CHINESE: "已拉取 {path}",
         Language.ENGLISH: "Pulled {path}",
+    },
+    "log_copied_left_to_right": {
+        Language.CHINESE: "已复制 左 -> 右：{path}",
+        Language.ENGLISH: "Copied left -> right: {path}",
+    },
+    "log_copied_right_to_left": {
+        Language.CHINESE: "已复制 右 -> 左：{path}",
+        Language.ENGLISH: "Copied right -> left: {path}",
     },
     "log_sync_complete": {
         Language.CHINESE: "同步完成：已尝试 {count} 个操作。",
@@ -283,6 +303,26 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "progress_failed": {
         Language.CHINESE: "失败",
         Language.ENGLISH: "Failed",
+    },
+    "progress_cancelled": {
+        Language.CHINESE: "已取消",
+        Language.ENGLISH: "Cancelled",
+    },
+    "log_scan_cancelled": {
+        Language.CHINESE: "扫描已取消。",
+        Language.ENGLISH: "Scan cancelled.",
+    },
+    "log_sync_cancelled": {
+        Language.CHINESE: "同步已取消，已完成 {count} 个操作。",
+        Language.ENGLISH: "Sync cancelled after {count} operations.",
+    },
+    "dialog_folder_mismatch_title": {
+        Language.CHINESE: "文件夹名称不一致",
+        Language.ENGLISH: "Folder names do not match",
+    },
+    "dialog_folder_mismatch_message": {
+        Language.CHINESE: "两个文件夹的末级名称不一致，仍要继续吗？",
+        Language.ENGLISH: "The two folders have different basenames. Continue anyway?",
     },
     "conflict_use_left": {
         Language.CHINESE: "使用左侧版本",

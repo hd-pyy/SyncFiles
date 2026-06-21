@@ -12,6 +12,17 @@ class OperationCancelled(Exception):
     """
 
 
+class AdbError(Exception):
+    """Raised when the adb binary itself is missing or not runnable.
+
+    Distinct from a non-zero return code (which means adb ran and
+    reported an error). Use ``DeviceState.ADB_MISSING`` for the
+    pre-flight check, and ``AdbError`` for the mid-run case where adb
+    vanished (e.g. antivirus quarantined the bundled binary between
+    app start and a sync run).
+    """
+
+
 class SourceSide(StrEnum):
     PHONE = "phone"
     LOCAL = "local"

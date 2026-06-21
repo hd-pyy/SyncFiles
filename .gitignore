@@ -2,4 +2,13 @@ __pycache__/
 .venv/
 .pytest_cache/
 .pytest-tmp/
+.pytest-run/
+.pytest-run-cache/
 *.egg-info/
+
+# PyInstaller build artifacts
+build/
+dist/
+
+# Adb fallback binaries (downloaded at build time, see docs/building.md)
+src/syncfiles/adb_fallback/
