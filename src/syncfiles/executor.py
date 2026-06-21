@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 from typing import Callable, Protocol
 
-from syncfiles.domain import CopyOperation, SourceSide
+from syncfiles.domain import CopyOperation, OperationCancelled, SourceSide
 from syncfiles.local_fs import ensure_parent_directory
 
 
@@ -17,6 +17,12 @@ class PhoneTransfer(Protocol):
 
 
 OperationCallback = Callable[[CopyOperation, float], None]
+CancellationCheck = Callable[[], bool]
+
+
+# Re-export for callers that import the exception from here. Defined in
+# ``domain`` so ``local_fs`` can raise it without a circular import.
+__all__ = ["CancellationCheck", "OperationCallback", "OperationCancelled", "PhoneTransfer", "SyncExecutor"]
 
 
 class SyncExecutor:
@@ -29,9 +35,12 @@ class SyncExecutor:
         self,
         operations: list[CopyOperation],
         on_operation_complete: OperationCallback | None = None,
+        is_cancelled: CancellationCheck | None = None,
     ) -> list[str]:
         completed: list[str] = []
         for operation in operations:
+            if is_cancelled is not None and is_cancelled():
+                raise OperationCancelled
             destination_relative = operation.final_destination_relative_path
             started = time.perf_counter()
             if operation.source_side is SourceSide.LOCAL and operation.destination_side is SourceSide.PHONE:

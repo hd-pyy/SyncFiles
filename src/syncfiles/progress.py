@@ -14,6 +14,7 @@ class ProgressState(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class ProgressMode(StrEnum):
@@ -132,6 +133,18 @@ class ProgressReporter:
         self._state = ProgressState.FAILED
         if current_path is not None:
             self._current_path = current_path
+        self._current_started_at = None
+        self._mode = ProgressMode.DETERMINATE
+        self._emit()
+
+    def cancel(self) -> None:
+        """Mark the run as cancelled by the user.
+
+        Distinct from ``fail()`` so the UI can render "Cancelled" instead
+        of "Failed" — same numeric progress, different surfaced message,
+        and no error dialog.
+        """
+        self._state = ProgressState.CANCELLED
         self._current_started_at = None
         self._mode = ProgressMode.DETERMINATE
         self._emit()

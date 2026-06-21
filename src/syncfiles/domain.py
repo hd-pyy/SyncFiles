@@ -4,6 +4,14 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 
+class OperationCancelled(Exception):
+    """Raised when a sync or scan run is aborted by the user.
+
+    Defined here in the lowest layer so both ``local_fs`` and the
+    executors can raise it without a circular import.
+    """
+
+
 class SourceSide(StrEnum):
     PHONE = "phone"
     LOCAL = "local"

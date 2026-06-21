@@ -4,7 +4,7 @@ import time
 from pathlib import Path
 
 from syncfiles.domain import CopyOperation, SourceSide
-from syncfiles.executor import OperationCallback
+from syncfiles.executor import CancellationCheck, OperationCallback, OperationCancelled
 from syncfiles.local_fs import copy_local_file
 
 
@@ -17,9 +17,12 @@ class LocalSyncExecutor:
         self,
         operations: list[CopyOperation],
         on_operation_complete: OperationCallback | None = None,
+        is_cancelled: CancellationCheck | None = None,
     ) -> list[str]:
         completed: list[str] = []
         for operation in operations:
+            if is_cancelled is not None and is_cancelled():
+                raise OperationCancelled
             started = time.perf_counter()
             destination_relative = operation.final_destination_relative_path
             if operation.source_side is SourceSide.LOCAL and operation.destination_side is SourceSide.PHONE:

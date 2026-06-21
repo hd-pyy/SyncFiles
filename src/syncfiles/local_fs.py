@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Callable
 
-from syncfiles.domain import FileRecord, SourceSide
+from syncfiles.domain import FileRecord, OperationCancelled, SourceSide
 
 
-def scan_local_folder(root: Path) -> list[FileRecord]:
+def scan_local_folder(
+    root: Path,
+    is_cancelled: Callable[[], bool] | None = None,
+) -> list[FileRecord]:
     records: list[FileRecord] = []
+    # rglob() returns one big sorted list; check between items so a large
+    # tree can still be interrupted in roughly O(per-entry) time.
     for path in sorted(root.rglob("*")):
+        if is_cancelled is not None and is_cancelled():
+            raise OperationCancelled
         if not path.is_file():
             continue
         stat = path.stat()
