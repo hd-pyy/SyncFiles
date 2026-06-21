@@ -335,6 +335,28 @@ def test_sftp_sync_mode_updates_labels_and_shows_connection_fields() -> None:
         root.destroy()
 
 
+def test_refresh_language_updates_mode_selector_and_tabs() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+
+        app.language = Language.ENGLISH
+        app._refresh_language()
+
+        assert tuple(app.mode_selector["values"]) == (
+            text("sync_mode_hard_drive", Language.ENGLISH),
+            text("sync_mode_phone", Language.ENGLISH),
+            text("sync_mode_sftp", Language.ENGLISH),
+        )
+        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
+            "tab_right_to_left",
+            Language.ENGLISH,
+        )
+    finally:
+        root.destroy()
+
+
 def test_sftp_config_validation_requires_credentials() -> None:
     root = tk.Tk()
     root.withdraw()

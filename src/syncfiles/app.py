@@ -277,9 +277,9 @@ class SyncFilesApp:
             text=self._tr("tab_conflicts"),
         )
         self.tab_text_keys = [
-            (self.phone_to_local_list, "tab_phone_to_local"),
-            (self.local_to_phone_list, "tab_local_to_phone"),
-            (self.conflict_list, "tab_conflicts"),
+            (self.phone_to_local_list._syncfiles_container, "tab_phone_to_local"),  # type: ignore[attr-defined]
+            (self.local_to_phone_list._syncfiles_container, "tab_local_to_phone"),  # type: ignore[attr-defined]
+            (self.conflict_list._syncfiles_container, "tab_conflicts"),  # type: ignore[attr-defined]
         ]
         self._refresh_mode_ui()
 
