@@ -49,6 +49,53 @@ def record(path: str, size: int, modified: int, side: SourceSide) -> FileRecord:
     return FileRecord(relative_path=path, size=size, modified_time=modified, side=side)
 
 
+class FakeSftpSession:
+    def __init__(self, records: list[FileRecord] | None = None) -> None:
+        self.records = records or []
+        self.scans: list[str] = []
+        self.uploads: list[tuple[str, str]] = []
+        self.downloads: list[tuple[str, str]] = []
+        self.closed = False
+
+    def __enter__(self) -> "FakeSftpSession":
+        return self
+
+    def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
+        self.closed = True
+
+    def scan_folder(self, remote_root: str, is_cancelled=None) -> list[FileRecord]:
+        self.scans.append(remote_root)
+        if is_cancelled is not None:
+            assert is_cancelled() is False
+        return self.records
+
+    def upload_file(self, local_path: Path, remote_path: str) -> None:
+        self.uploads.append((str(local_path), remote_path))
+
+    def download_file(self, remote_path: str, local_path: Path) -> None:
+        self.downloads.append((remote_path, str(local_path)))
+
+
+class FakeSftpClient:
+    def __init__(self, session: FakeSftpSession) -> None:
+        self.session = session
+        self.configs: list[object] = []
+
+    def connect(self, config: object) -> FakeSftpSession:
+        self.configs.append(config)
+        return self.session
+
+
+def configure_sftp_app(app: SyncFilesApp, remote_root: str = "/remote") -> None:
+    app.sync_mode = SyncMode.SFTP
+    app.sftp_host.set("example.com")
+    app.sftp_port.set("22")
+    app.sftp_username.set("alice")
+    app.sftp_password.set("secret")
+    app.phone_root.set(remote_root)
+    app._refresh_mode_ui()
+
+
 def test_build_operations_from_plan_includes_missing_files_and_conflict_choices() -> None:
     plan = build_sync_plan(
         phone_files=[
@@ -420,6 +467,34 @@ def test_phone_mode_scan_still_uses_adb(tmp_path: Path) -> None:
         app._scan_worker(left, "/sdcard/DCIM")
 
         assert captured == ["/sdcard/DCIM"]
+    finally:
+        root.destroy()
+
+
+def test_sftp_mode_scan_uses_sftp_client_not_adb(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    left.mkdir()
+    (left / "local-only.txt").write_text("left", encoding="utf-8")
+    session = FakeSftpSession(
+        [
+            record("remote-only.txt", 6, 1, SourceSide.PHONE),
+        ]
+    )
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        configure_sftp_app(app)
+        app.sftp_client = FakeSftpClient(session)  # type: ignore[assignment]
+        app.adb.scan_phone_folder = lambda _path: (_ for _ in ()).throw(AssertionError("ADB was used"))  # type: ignore[method-assign]
+
+        app._scan_worker(left, "/remote")
+
+        assert session.scans == ["/remote"]
+        assert session.closed is True
+        assert app.plan is not None
+        assert [item.relative_path for item in app.plan.local_to_phone] == ["local-only.txt"]
+        assert [item.relative_path for item in app.plan.phone_to_local] == ["remote-only.txt"]
     finally:
         root.destroy()
 

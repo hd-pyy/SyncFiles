@@ -466,11 +466,12 @@ class SyncFilesApp:
             mode=ProgressMode.INDETERMINATE,
         )
         local_files = scan_local_folder(local, is_cancelled=self._cancel_event.is_set)
-        self.progress.advance(
-            current_path=self._tr(
-                "progress_current_phone" if self.sync_mode is SyncMode.PHONE else "progress_current_right"
-            )
-        )
+        second_progress_key = "progress_current_phone"
+        if self.sync_mode is SyncMode.HARD_DRIVE:
+            second_progress_key = "progress_current_right"
+        elif self.sync_mode is SyncMode.SFTP:
+            second_progress_key = "progress_current_sftp"
+        self.progress.advance(current_path=self._tr(second_progress_key))
         if self._cancel_event.is_set():
             raise OperationCancelled
         second_files = self._scan_second_folder(phone)
@@ -487,6 +488,10 @@ class SyncFilesApp:
         if self.sync_mode is SyncMode.PHONE:
             self._log(self._tr("log_scanning_phone"))
             return self.adb.scan_phone_folder(second)
+        if self.sync_mode is SyncMode.SFTP:
+            self._log(self._tr("log_scanning_sftp"))
+            with self.sftp_client.connect(self._sftp_config()) as session:
+                return session.scan_folder(second, is_cancelled=self._cancel_event.is_set)
         self._log(self._tr("log_scanning_right"))
         records = scan_local_folder(Path(second), is_cancelled=self._cancel_event.is_set)
         return [
@@ -512,9 +517,12 @@ class SyncFilesApp:
         for conflict in self.plan.conflicts:
             action = self.conflict_choices.get(conflict.relative_path, ConflictAction.SKIP)
             self.conflict_list.insert(END, f"{conflict.relative_path} [{self._conflict_action_label(action)}]")
-        scan_complete_key = (
-            "log_scan_complete" if self.sync_mode is SyncMode.PHONE else "log_scan_complete_hard_drive"
-        )
+        if self.sync_mode is SyncMode.PHONE:
+            scan_complete_key = "log_scan_complete"
+        elif self.sync_mode is SyncMode.SFTP:
+            scan_complete_key = "log_scan_complete_sftp"
+        else:
+            scan_complete_key = "log_scan_complete_hard_drive"
         self._log(
             self._tr(
                 scan_complete_key,

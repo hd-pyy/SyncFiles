@@ -244,6 +244,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "正在扫描手机文件夹...",
         Language.ENGLISH: "Scanning phone folder...",
     },
+    "log_scanning_sftp": {
+        Language.CHINESE: "正在扫描 SFTP 远端文件夹...",
+        Language.ENGLISH: "Scanning SFTP remote folder...",
+    },
     "log_scan_complete": {
         Language.CHINESE: "扫描完成：{phone_to_local} 个手机到硬盘，{local_to_phone} 个硬盘到手机，{conflicts} 个冲突。",
         Language.ENGLISH: "Scan complete: {phone_to_local} phone-to-hard-drive, {local_to_phone} hard-drive-to-phone, {conflicts} conflicts.",
@@ -251,6 +255,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "log_scan_complete_hard_drive": {
         Language.CHINESE: "扫描完成：{phone_to_local} 个右侧到左侧，{local_to_phone} 个左侧到右侧，{conflicts} 个冲突。",
         Language.ENGLISH: "Scan complete: {phone_to_local} right-to-left, {local_to_phone} left-to-right, {conflicts} conflicts.",
+    },
+    "log_scan_complete_sftp": {
+        Language.CHINESE: "扫描完成：{phone_to_local} 个 SFTP 到硬盘，{local_to_phone} 个硬盘到 SFTP，{conflicts} 个冲突。",
+        Language.ENGLISH: "Scan complete: {phone_to_local} SFTP-to-hard-drive, {local_to_phone} hard-drive-to-SFTP, {conflicts} conflicts.",
     },
     "dialog_conflict_action": {
         Language.CHINESE: "冲突处理",
@@ -335,6 +343,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "progress_current_phone": {
         Language.CHINESE: "正在扫描手机文件夹",
         Language.ENGLISH: "Scanning phone folder",
+    },
+    "progress_current_sftp": {
+        Language.CHINESE: "正在扫描 SFTP 远端文件夹",
+        Language.ENGLISH: "Scanning SFTP remote folder",
     },
     "progress_current_right": {
         Language.CHINESE: "正在扫描右侧硬盘文件夹",
