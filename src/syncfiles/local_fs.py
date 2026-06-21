@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from syncfiles.domain import FileRecord, SourceSide
@@ -24,3 +25,8 @@ def scan_local_folder(root: Path) -> list[FileRecord]:
 
 def ensure_parent_directory(destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
+
+
+def copy_local_file(source: Path, destination: Path) -> None:
+    ensure_parent_directory(destination)
+    shutil.copy2(source, destination)

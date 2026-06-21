@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from syncfiles.domain import SourceSide
-from syncfiles.local_fs import ensure_parent_directory, scan_local_folder
+from syncfiles.local_fs import copy_local_file, ensure_parent_directory, scan_local_folder
 
 
 def test_scans_local_folder_with_relative_paths(tmp_path: Path) -> None:
@@ -33,3 +33,14 @@ def test_ensure_parent_directory_creates_nested_destination(tmp_path: Path) -> N
     ensure_parent_directory(destination)
 
     assert destination.parent.is_dir()
+
+
+def test_copy_local_file_creates_parent_and_copies_bytes(tmp_path: Path) -> None:
+    source = tmp_path / "source" / "photos" / "a.jpg"
+    destination = tmp_path / "dest" / "nested" / "a.jpg"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"image-bytes")
+
+    copy_local_file(source, destination)
+
+    assert destination.read_bytes() == b"image-bytes"
