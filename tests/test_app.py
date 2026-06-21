@@ -529,6 +529,36 @@ def test_hard_drive_mode_sync_copies_between_local_roots(tmp_path: Path) -> None
         root.destroy()
 
 
+def test_sftp_mode_sync_uses_sftp_executor(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    left.mkdir()
+    (left / "local-only.txt").write_text("left", encoding="utf-8")
+    session = FakeSftpSession()
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        configure_sftp_app(app)
+        app.sftp_client = FakeSftpClient(session)  # type: ignore[assignment]
+        app.plan = build_sync_plan(
+            phone_files=[
+                record("remote-only.txt", 6, 1, SourceSide.PHONE),
+            ],
+            local_files=[
+                record("local-only.txt", 4, 1, SourceSide.LOCAL),
+            ],
+        )
+        app.conflict_choices = {}
+
+        app._sync_worker(left, "/remote")
+
+        assert session.downloads == [("/remote/remote-only.txt", str(left / "remote-only.txt"))]
+        assert session.uploads == [(str(left / "local-only.txt"), "/remote/local-only.txt")]
+        assert session.closed is True
+    finally:
+        root.destroy()
+
+
 def test_phone_mode_sync_still_uses_adb_transfer(tmp_path: Path) -> None:
     root = tk.Tk()
     root.withdraw()
@@ -550,6 +580,19 @@ def test_phone_mode_sync_still_uses_adb_transfer(tmp_path: Path) -> None:
 
         assert app.adb.pulls == [("/sdcard/Test/phone-only.txt", str(tmp_path / "local" / "phone-only.txt"))]
         assert app.adb.pushes == [(str(tmp_path / "local" / "local-only.txt"), "/sdcard/Test/local-only.txt")]
+    finally:
+        root.destroy()
+
+
+def test_sftp_conflict_action_labels_follow_sync_mode() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.SFTP
+
+        assert app._conflict_action_label(ConflictAction.USE_PHONE) == text("conflict_use_sftp", app.language)
+        assert app._conflict_action_label(ConflictAction.USE_LOCAL) == text("conflict_use_hard_drive", app.language)
     finally:
         root.destroy()
 

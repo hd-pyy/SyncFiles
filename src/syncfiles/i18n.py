@@ -296,6 +296,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "已拉取 {path}",
         Language.ENGLISH: "Pulled {path}",
     },
+    "log_uploaded_sftp": {
+        Language.CHINESE: "已上传到 SFTP：{path}",
+        Language.ENGLISH: "Uploaded to SFTP: {path}",
+    },
+    "log_downloaded_sftp": {
+        Language.CHINESE: "已从 SFTP 下载：{path}",
+        Language.ENGLISH: "Downloaded from SFTP: {path}",
+    },
     "log_copied_left_to_right": {
         Language.CHINESE: "已复制 左 -> 右：{path}",
         Language.ENGLISH: "Copied left -> right: {path}",
@@ -391,6 +399,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "conflict_use_phone": {
         Language.CHINESE: "使用手机版本",
         Language.ENGLISH: "Use phone version",
+    },
+    "conflict_use_sftp": {
+        Language.CHINESE: "使用 SFTP 版本",
+        Language.ENGLISH: "Use SFTP version",
     },
     "conflict_use_hard_drive": {
         Language.CHINESE: "使用硬盘版本",

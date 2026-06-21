@@ -31,6 +31,7 @@ from syncfiles.local_fs import scan_local_folder
 from syncfiles.local_executor import LocalSyncExecutor
 from syncfiles.progress import ProgressMode, ProgressReporter, ProgressSnapshot, ProgressState, format_duration
 from syncfiles.sftp import SftpClient, SftpConnectionConfig
+from syncfiles.sftp_executor import SftpSyncExecutor
 
 
 class SyncMode(StrEnum):
@@ -628,16 +629,29 @@ class SyncFilesApp:
                 )
                 self.progress.advance(current_path=next_path)
 
-            if self.sync_mode is SyncMode.PHONE:
-                executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
-            else:
-                executor = LocalSyncExecutor(left_root=local, right_root=Path(phone))
             try:
-                executor.execute_operations(
-                    operations,
-                    on_operation_complete=hook,
-                    is_cancelled=self._cancel_event.is_set,
-                )
+                if self.sync_mode is SyncMode.PHONE:
+                    executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
+                    executor.execute_operations(
+                        operations,
+                        on_operation_complete=hook,
+                        is_cancelled=self._cancel_event.is_set,
+                    )
+                elif self.sync_mode is SyncMode.SFTP:
+                    with self.sftp_client.connect(self._sftp_config()) as session:
+                        executor = SftpSyncExecutor(sftp=session, local_root=local, remote_root=phone)
+                        executor.execute_operations(
+                            operations,
+                            on_operation_complete=hook,
+                            is_cancelled=self._cancel_event.is_set,
+                        )
+                else:
+                    executor = LocalSyncExecutor(left_root=local, right_root=Path(phone))
+                    executor.execute_operations(
+                        operations,
+                        on_operation_complete=hook,
+                        is_cancelled=self._cancel_event.is_set,
+                    )
             except OperationCancelled:
                 self._log_executed_operations(completed_operations)
                 self._log(self._tr("log_sync_cancelled", count=len(completed_operations)))
@@ -652,8 +666,15 @@ class SyncFilesApp:
             self.progress.succeed()
 
     def _log_executed_operations(self, operations: list[CopyOperation]) -> None:
-        push_key = "log_pushed" if self.sync_mode is SyncMode.PHONE else "log_copied_left_to_right"
-        pull_key = "log_pulled" if self.sync_mode is SyncMode.PHONE else "log_copied_right_to_left"
+        if self.sync_mode is SyncMode.PHONE:
+            push_key = "log_pushed"
+            pull_key = "log_pulled"
+        elif self.sync_mode is SyncMode.SFTP:
+            push_key = "log_uploaded_sftp"
+            pull_key = "log_downloaded_sftp"
+        else:
+            push_key = "log_copied_left_to_right"
+            pull_key = "log_copied_right_to_left"
         for operation in operations:
             if operation.source_side is SourceSide.LOCAL and operation.destination_side is SourceSide.PHONE:
                 self._log(self._tr(push_key, path=operation.relative_path))
@@ -855,6 +876,12 @@ class SyncFilesApp:
 
     def _conflict_action_label(self, action: ConflictAction) -> str:
         if self.sync_mode is SyncMode.PHONE:
+            return conflict_action_label(action, self.language)
+        if self.sync_mode is SyncMode.SFTP:
+            if action is ConflictAction.USE_PHONE:
+                return self._tr("conflict_use_sftp")
+            if action is ConflictAction.USE_LOCAL:
+                return self._tr("conflict_use_hard_drive")
             return conflict_action_label(action, self.language)
         if action is ConflictAction.USE_PHONE:
             return self._tr("conflict_use_right")
