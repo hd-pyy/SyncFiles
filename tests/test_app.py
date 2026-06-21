@@ -1,6 +1,8 @@
 from pathlib import Path
 import tkinter as tk
 
+import pytest
+
 from syncfiles.app import (
     SyncMode,
     SyncFilesApp,
@@ -16,7 +18,7 @@ from syncfiles.domain import (
     SourceSide,
     build_sync_plan,
 )
-from syncfiles.i18n import text
+from syncfiles.i18n import Language, text
 from syncfiles.progress import ProgressMode, ProgressSnapshot, ProgressState
 
 
@@ -259,6 +261,63 @@ def test_changing_sync_mode_updates_labels_and_clears_plan() -> None:
             "tab_phone_to_local",
             app.language,
         )
+    finally:
+        root.destroy()
+
+
+def test_sftp_sync_mode_updates_labels_and_shows_connection_fields() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+
+        app.mode_label.set(text("sync_mode_sftp", app.language))
+        app.change_sync_mode()
+
+        assert app.sync_mode is SyncMode.SFTP
+        assert str(app.check_device_button["state"]) == "disabled"
+        assert app.first_folder_label.cget("text") == text("label_local_folder", app.language)
+        assert app.second_folder_label.cget("text") == text("label_sftp_remote_folder", app.language)
+        assert str(app.second_choose_button["state"]) == "disabled"
+        assert app.sftp_frame.winfo_manager() == "pack"
+        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
+            "tab_sftp_to_local",
+            app.language,
+        )
+    finally:
+        root.destroy()
+
+
+def test_sftp_config_validation_requires_credentials() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.language = Language.ENGLISH
+        app.sync_mode = SyncMode.SFTP
+        app.phone_root.set("/remote")
+
+        with pytest.raises(ValueError, match="Enter SFTP host, username, password, and remote folder."):
+            app._sftp_config()
+    finally:
+        root.destroy()
+
+
+def test_sftp_config_validation_rejects_invalid_port() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.language = Language.ENGLISH
+        app.sync_mode = SyncMode.SFTP
+        app.sftp_host.set("example.com")
+        app.sftp_port.set("abc")
+        app.sftp_username.set("alice")
+        app.sftp_password.set("secret")
+        app.phone_root.set("/remote")
+
+        with pytest.raises(ValueError, match="Enter an SFTP port between 1 and 65535."):
+            app._sftp_config()
     finally:
         root.destroy()
 

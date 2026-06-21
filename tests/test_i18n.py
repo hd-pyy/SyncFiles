@@ -25,3 +25,14 @@ def test_sync_mode_and_left_right_labels_are_translated() -> None:
     assert text("label_right_folder", Language.ENGLISH) == "Right hard drive folder"
     assert text("tab_left_to_right", Language.ENGLISH) == "Left -> right"
     assert text("tab_right_to_left", Language.ENGLISH) == "Right -> left"
+
+
+def test_sftp_labels_are_translated() -> None:
+    assert text("sync_mode_sftp", Language.ENGLISH) == "Hard drive <-> SFTP"
+    assert text("label_sftp_host", Language.ENGLISH) == "Host"
+    assert text("label_sftp_port", Language.ENGLISH) == "Port"
+    assert text("label_sftp_username", Language.ENGLISH) == "Username"
+    assert text("label_sftp_password", Language.ENGLISH) == "Password"
+    assert text("label_sftp_remote_folder", Language.ENGLISH) == "SFTP remote folder"
+    assert text("tab_sftp_to_local", Language.ENGLISH) == "SFTP -> hard drive"
+    assert text("tab_local_to_sftp", Language.ENGLISH) == "Hard drive -> SFTP"

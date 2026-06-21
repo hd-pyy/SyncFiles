@@ -68,6 +68,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "硬盘 <-> 手机",
         Language.ENGLISH: "Hard drive <-> phone",
     },
+    "sync_mode_sftp": {
+        Language.CHINESE: "硬盘 <-> SFTP",
+        Language.ENGLISH: "Hard drive <-> SFTP",
+    },
     "button_check_device": {
         Language.CHINESE: "检查设备",
         Language.ENGLISH: "Check device",
@@ -91,6 +95,26 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "label_phone_folder": {
         Language.CHINESE: "手机文件夹",
         Language.ENGLISH: "Phone folder",
+    },
+    "label_sftp_host": {
+        Language.CHINESE: "主机",
+        Language.ENGLISH: "Host",
+    },
+    "label_sftp_port": {
+        Language.CHINESE: "端口",
+        Language.ENGLISH: "Port",
+    },
+    "label_sftp_username": {
+        Language.CHINESE: "用户名",
+        Language.ENGLISH: "Username",
+    },
+    "label_sftp_password": {
+        Language.CHINESE: "密码",
+        Language.ENGLISH: "Password",
+    },
+    "label_sftp_remote_folder": {
+        Language.CHINESE: "SFTP 远端文件夹",
+        Language.ENGLISH: "SFTP remote folder",
     },
     "button_browse_phone": {
         Language.CHINESE: "浏览手机",
@@ -123,6 +147,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "tab_right_to_left": {
         Language.CHINESE: "右侧 -> 左侧",
         Language.ENGLISH: "Right -> left",
+    },
+    "tab_sftp_to_local": {
+        Language.CHINESE: "SFTP -> 硬盘",
+        Language.ENGLISH: "SFTP -> hard drive",
+    },
+    "tab_local_to_sftp": {
+        Language.CHINESE: "硬盘 -> SFTP",
+        Language.ENGLISH: "Hard drive -> SFTP",
     },
     "tab_conflicts": {
         Language.CHINESE: "冲突",
@@ -171,6 +203,18 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "dialog_busy_message": {
         Language.CHINESE: "当前正在扫描或同步，请等待完成后再操作。",
         Language.ENGLISH: "A scan or sync is already running. Wait for it to finish.",
+    },
+    "dialog_sftp_config_title": {
+        Language.CHINESE: "SFTP 配置不完整",
+        Language.ENGLISH: "Incomplete SFTP configuration",
+    },
+    "error_sftp_missing_fields": {
+        Language.CHINESE: "请输入 SFTP 主机、用户名、密码和远端文件夹。",
+        Language.ENGLISH: "Enter SFTP host, username, password, and remote folder.",
+    },
+    "error_sftp_invalid_port": {
+        Language.CHINESE: "请输入 1 到 65535 之间的 SFTP 端口。",
+        Language.ENGLISH: "Enter an SFTP port between 1 and 65535.",
     },
     "dialog_no_phone_selection_title": {
         Language.CHINESE: "未选择文件夹",

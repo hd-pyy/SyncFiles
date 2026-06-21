@@ -30,11 +30,13 @@ from syncfiles.i18n import (
 from syncfiles.local_fs import scan_local_folder
 from syncfiles.local_executor import LocalSyncExecutor
 from syncfiles.progress import ProgressMode, ProgressReporter, ProgressSnapshot, ProgressState, format_duration
+from syncfiles.sftp import SftpClient, SftpConnectionConfig
 
 
 class SyncMode(StrEnum):
     HARD_DRIVE = "hard_drive"
     PHONE = "phone"
+    SFTP = "sftp"
 
 
 DEVICE_STATUS_TEXT_KEYS: dict[DeviceState, str] = {
@@ -106,8 +108,13 @@ class SyncFilesApp:
         self.root.geometry("620x780")
         self.root.minsize(520, 600)
         self.adb = AdbClient()
+        self.sftp_client = SftpClient()
         self.local_root = StringVar()
         self.phone_root = StringVar(value="/sdcard")
+        self.sftp_host = StringVar()
+        self.sftp_port = StringVar(value="22")
+        self.sftp_username = StringVar()
+        self.sftp_password = StringVar()
         self.language_label = StringVar(value=LANGUAGE_LABELS[self.language])
         self.sync_mode = SyncMode.HARD_DRIVE
         self.mode_label = StringVar(value=self._sync_mode_label(self.sync_mode))
@@ -182,6 +189,7 @@ class SyncFilesApp:
             values=[
                 self._tr("sync_mode_hard_drive"),
                 self._tr("sync_mode_phone"),
+                self._tr("sync_mode_sftp"),
             ],
             state="readonly",
             width=20,
@@ -210,6 +218,17 @@ class SyncFilesApp:
         )
         self.second_choose_button.pack(side=RIGHT)
         self.phone_browse_button = self.second_choose_button
+
+        self.sftp_frame = ttk.Frame(outer)
+        self.sftp_frame.pack(fill=X, pady=4)
+        self._register(ttk.Label(self.sftp_frame), "label_sftp_host").pack(side=LEFT)
+        ttk.Entry(self.sftp_frame, textvariable=self.sftp_host, width=14).pack(side=LEFT, padx=(4, 8))
+        self._register(ttk.Label(self.sftp_frame), "label_sftp_port").pack(side=LEFT)
+        ttk.Entry(self.sftp_frame, textvariable=self.sftp_port, width=6).pack(side=LEFT, padx=(4, 8))
+        self._register(ttk.Label(self.sftp_frame), "label_sftp_username").pack(side=LEFT)
+        ttk.Entry(self.sftp_frame, textvariable=self.sftp_username, width=12).pack(side=LEFT, padx=(4, 8))
+        self._register(ttk.Label(self.sftp_frame), "label_sftp_password").pack(side=LEFT)
+        ttk.Entry(self.sftp_frame, textvariable=self.sftp_password, show="*", width=12).pack(side=LEFT, padx=(4, 0))
 
         actions = ttk.Frame(outer)
         actions.pack(fill=X, pady=8)
@@ -425,6 +444,8 @@ class SyncFilesApp:
         if not local or not phone:
             messagebox.showwarning(self._tr("dialog_missing_folders_title"), self._tr("dialog_missing_folders_message"))
             return
+        if self.sync_mode is SyncMode.SFTP and not self._validate_sftp_config_or_warn():
+            return
         if not folders_share_basename(local, phone):
             if not messagebox.askyesno(
                 self._tr("dialog_folder_mismatch_title"),
@@ -560,6 +581,8 @@ class SyncFilesApp:
             return
         local = self.local_root.get()
         phone = self.phone_root.get()
+        if self.sync_mode is SyncMode.SFTP and not self._validate_sftp_config_or_warn():
+            return
         if not folders_share_basename(local, phone):
             if not messagebox.askyesno(
                 self._tr("dialog_folder_mismatch_title"),
@@ -772,6 +795,7 @@ class SyncFilesApp:
             values=[
                 self._tr("sync_mode_hard_drive"),
                 self._tr("sync_mode_phone"),
+                self._tr("sync_mode_sftp"),
             ]
         )
         for widget, key in self.translatable_widgets:
@@ -785,11 +809,41 @@ class SyncFilesApp:
             self._render_progress(self._current_snapshot)
 
     def _sync_mode_label(self, mode: SyncMode) -> str:
-        key = "sync_mode_phone" if mode is SyncMode.PHONE else "sync_mode_hard_drive"
-        return self._tr(key)
+        if mode is SyncMode.PHONE:
+            return self._tr("sync_mode_phone")
+        if mode is SyncMode.SFTP:
+            return self._tr("sync_mode_sftp")
+        return self._tr("sync_mode_hard_drive")
 
     def _sync_mode_from_label(self, label: str) -> SyncMode:
-        return SyncMode.PHONE if label == self._tr("sync_mode_phone") else SyncMode.HARD_DRIVE
+        if label == self._tr("sync_mode_phone"):
+            return SyncMode.PHONE
+        if label == self._tr("sync_mode_sftp"):
+            return SyncMode.SFTP
+        return SyncMode.HARD_DRIVE
+
+    def _sftp_config(self) -> SftpConnectionConfig:
+        host = self.sftp_host.get().strip()
+        username = self.sftp_username.get().strip()
+        password = self.sftp_password.get()
+        remote_root = self.phone_root.get().strip()
+        if not host or not username or not password or not remote_root:
+            raise ValueError(self._tr("error_sftp_missing_fields"))
+        try:
+            port = int(self.sftp_port.get().strip())
+        except ValueError as exc:
+            raise ValueError(self._tr("error_sftp_invalid_port")) from exc
+        if port < 1 or port > 65535:
+            raise ValueError(self._tr("error_sftp_invalid_port"))
+        return SftpConnectionConfig(host=host, port=port, username=username, password=password)
+
+    def _validate_sftp_config_or_warn(self) -> bool:
+        try:
+            self._sftp_config()
+        except ValueError as exc:
+            messagebox.showwarning(self._tr("dialog_sftp_config_title"), str(exc))
+            return False
+        return True
 
     def _conflict_action_label(self, action: ConflictAction) -> str:
         if self.sync_mode is SyncMode.PHONE:
@@ -803,11 +857,13 @@ class SyncFilesApp:
     def _refresh_mode_ui(self) -> None:
         self.mode_label.set(self._sync_mode_label(self.sync_mode))
         if self.sync_mode is SyncMode.PHONE:
+            self.sftp_frame.pack_forget()
             self.check_device_button.configure(state="disabled" if self.busy else "normal")
             self.first_folder_label.configure(text=self._tr("label_local_folder"))
             self.second_folder_label.configure(text=self._tr("label_phone_folder"))
             self.second_choose_button.configure(
                 text=self._tr("button_browse_phone"),
+                state="disabled" if self.busy else "normal",
                 command=self.open_phone_browser,
             )
             self.notebook.tab(
@@ -818,12 +874,32 @@ class SyncFilesApp:
                 self.local_to_phone_list._syncfiles_container,  # type: ignore[attr-defined]
                 text=self._tr("tab_local_to_phone"),
             )
+        elif self.sync_mode is SyncMode.SFTP:
+            self.sftp_frame.pack(fill=X, pady=4)
+            self.check_device_button.configure(state="disabled")
+            self.first_folder_label.configure(text=self._tr("label_local_folder"))
+            self.second_folder_label.configure(text=self._tr("label_sftp_remote_folder"))
+            self.second_choose_button.configure(
+                text=self._tr("button_choose"),
+                state="disabled",
+                command=self.choose_second_folder,
+            )
+            self.notebook.tab(
+                self.phone_to_local_list._syncfiles_container,  # type: ignore[attr-defined]
+                text=self._tr("tab_sftp_to_local"),
+            )
+            self.notebook.tab(
+                self.local_to_phone_list._syncfiles_container,  # type: ignore[attr-defined]
+                text=self._tr("tab_local_to_sftp"),
+            )
         else:
+            self.sftp_frame.pack_forget()
             self.check_device_button.configure(state="disabled")
             self.first_folder_label.configure(text=self._tr("label_left_folder"))
             self.second_folder_label.configure(text=self._tr("label_right_folder"))
             self.second_choose_button.configure(
                 text=self._tr("button_choose"),
+                state="disabled" if self.busy else "normal",
                 command=self.choose_second_folder,
             )
             self.notebook.tab(
