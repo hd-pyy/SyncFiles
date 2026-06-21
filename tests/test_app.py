@@ -6,6 +6,8 @@ from syncfiles.app import (
     SyncFilesApp,
     build_operations_from_plan,
     default_language_label,
+    folder_basename,
+    folders_share_basename,
     phone_folder_to_choose,
 )
 from syncfiles.domain import (
@@ -104,6 +106,41 @@ def test_phone_folder_choose_prefers_highlighted_directory() -> None:
 def test_phone_folder_choose_uses_current_directory_without_highlight() -> None:
     assert phone_folder_to_choose("/sdcard/Documents", None) == "/sdcard/Documents"
     assert phone_folder_to_choose("/sdcard/Documents", "..") == "/sdcard/Documents"
+
+
+def test_folder_basename_handles_windows_paths() -> None:
+    assert folder_basename("C:\\Users\\foo\\Photos") == "Photos"
+
+
+def test_folder_basename_handles_unix_paths() -> None:
+    assert folder_basename("/sdcard/Download") == "Download"
+
+
+def test_folder_basename_strips_trailing_separators() -> None:
+    assert folder_basename("/sdcard/Download/") == "Download"
+    assert folder_basename("C:\\Users\\foo\\") == "foo"
+
+
+def test_folder_basename_returns_empty_for_roots() -> None:
+    assert folder_basename("/") == ""
+    assert folder_basename("") == ""
+
+
+def test_folders_share_basename_matches_same_name_across_os() -> None:
+    assert folders_share_basename(
+        "D:\\Photos\\Vacation2024", "/sdcard/DCIM/Vacation2024"
+    )
+
+
+def test_folders_share_basename_detects_mismatch() -> None:
+    assert not folders_share_basename(
+        "D:\\Photos\\Vacation2024", "/sdcard/DCIM/Camera"
+    )
+
+
+def test_folders_share_basename_passes_through_roots() -> None:
+    assert folders_share_basename("/", "/sdcard")
+    assert folders_share_basename("D:\\Photos", "")
 
 
 def test_progress_widgets_exist_in_idle_state() -> None:

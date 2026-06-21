@@ -75,6 +75,26 @@ def phone_folder_to_choose(current_path: str, selected_value: str | None) -> str
     return current_path
 
 
+def folder_basename(path: str) -> str:
+    cleaned = path.strip().rstrip("/\\")
+    if not cleaned:
+        return ""
+    for separator in ("/", "\\"):
+        if separator in cleaned:
+            cleaned = cleaned.rsplit(separator, 1)[-1]
+    return cleaned
+
+
+def folders_share_basename(local: str, other: str) -> bool:
+    # Empty basenames (root paths or unset inputs) are treated as ambiguous
+    # so a user who picks "/" + "/sdcard" or leaves a field blank is not warned.
+    local_name = folder_basename(local)
+    other_name = folder_basename(other)
+    if not local_name or not other_name:
+        return True
+    return local_name == other_name
+
+
 class SyncFilesApp:
     def __init__(self, root: Tk) -> None:
         self.root = root
@@ -311,6 +331,16 @@ class SyncFilesApp:
         if not local or not phone:
             messagebox.showwarning(self._tr("dialog_missing_folders_title"), self._tr("dialog_missing_folders_message"))
             return
+        if not folders_share_basename(local, phone):
+            if not messagebox.askyesno(
+                self._tr("dialog_folder_mismatch_title"),
+                self._tr(
+                    "dialog_folder_mismatch_message",
+                    first=folder_basename(local),
+                    second=folder_basename(phone),
+                ),
+            ):
+                return
         self._run_background(lambda: self._scan_worker(Path(local), phone))
 
     def _scan_worker(self, local: Path, phone: str) -> None:
@@ -427,9 +457,21 @@ class SyncFilesApp:
         if self.plan is None:
             messagebox.showwarning(self._tr("dialog_no_scan_title"), self._tr("dialog_no_scan_message"))
             return
+        local = self.local_root.get()
+        phone = self.phone_root.get()
+        if not folders_share_basename(local, phone):
+            if not messagebox.askyesno(
+                self._tr("dialog_folder_mismatch_title"),
+                self._tr(
+                    "dialog_folder_mismatch_message",
+                    first=folder_basename(local),
+                    second=folder_basename(phone),
+                ),
+            ):
+                return
         if not messagebox.askyesno(self._tr("dialog_confirm_sync_title"), self._tr("dialog_confirm_sync_message")):
             return
-        self._run_background(lambda: self._sync_worker(Path(self.local_root.get()), self.phone_root.get()))
+        self._run_background(lambda: self._sync_worker(Path(local), phone))
 
     def _sync_worker(self, local: Path, phone: str) -> None:
         if self.plan is None:

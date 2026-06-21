@@ -216,6 +216,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "现在执行列表中的复制操作吗？",
         Language.ENGLISH: "Run the listed copy operations now?",
     },
+    "dialog_folder_mismatch_title": {
+        Language.CHINESE: "文件夹名称不一致",
+        Language.ENGLISH: "Folder names do not match",
+    },
+    "dialog_folder_mismatch_message": {
+        Language.CHINESE: "所选的两个文件夹名称不同：{first} 与 {second}。通常它们不是同一组数据，是否仍要继续？",
+        Language.ENGLISH: "The selected folders have different names: {first} vs {second}. They usually aren't the same dataset. Continue anyway?",
+    },
     "log_pushed": {
         Language.CHINESE: "已推送 {path}",
         Language.ENGLISH: "Pushed {path}",
