@@ -28,6 +28,18 @@ class ExplodingProgressBar:
         raise AssertionError("worker must not stop progressbar directly")
 
 
+class FakeTransfer:
+    def __init__(self) -> None:
+        self.pushes: list[tuple[str, str]] = []
+        self.pulls: list[tuple[str, str]] = []
+
+    def push(self, local_path: str, phone_path: str) -> None:
+        self.pushes.append((local_path, phone_path))
+
+    def pull(self, phone_path: str, local_path: str) -> None:
+        self.pulls.append((phone_path, local_path))
+
+
 def record(path: str, size: int, modified: int, side: SourceSide) -> FileRecord:
     return FileRecord(relative_path=path, size=size, modified_time=modified, side=side)
 
@@ -209,5 +221,36 @@ def test_scan_worker_does_not_touch_progressbar_from_worker_thread(tmp_path: Pat
         while not app.progress_queue.empty():
             drained.append(app.progress_queue.get_nowait())
         assert drained[-1].state is ProgressState.SUCCEEDED
+    finally:
+        root.destroy()
+
+
+def test_sync_progress_moves_current_path_to_next_operation(tmp_path: Path) -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.adb = FakeTransfer()  # type: ignore[assignment]
+        app.plan = build_sync_plan(
+            phone_files=[
+                record("phone-a.jpg", 1, 10, SourceSide.PHONE),
+                record("phone-b.jpg", 1, 10, SourceSide.PHONE),
+            ],
+            local_files=[],
+        )
+        app.conflict_choices = {}
+
+        app._sync_worker(tmp_path / "local", "/sdcard/Test")
+
+        snapshots: list[ProgressSnapshot] = []
+        while not app.progress_queue.empty():
+            snapshots.append(app.progress_queue.get_nowait())
+        running_paths = [
+            snap.current_path
+            for snap in snapshots
+            if snap.state is ProgressState.RUNNING
+        ]
+
+        assert running_paths == ["phone-a.jpg", "phone-b.jpg", None]
     finally:
         root.destroy()

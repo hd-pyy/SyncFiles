@@ -377,8 +377,17 @@ class SyncFilesApp:
             current_path=operations[0].relative_path if operations else None,
         )
         try:
-            def hook(operation: CopyOperation, _elapsed: float) -> None:
-                self.progress.advance(current_path=operation.relative_path)
+            completed_count = 0
+
+            def hook(_operation: CopyOperation, _elapsed: float) -> None:
+                nonlocal completed_count
+                completed_count += 1
+                next_path = (
+                    operations[completed_count].relative_path
+                    if completed_count < len(operations)
+                    else None
+                )
+                self.progress.advance(current_path=next_path)
 
             executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
             executor.execute_operations(operations, on_operation_complete=hook)
