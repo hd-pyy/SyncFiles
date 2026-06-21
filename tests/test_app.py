@@ -425,6 +425,7 @@ def test_sync_progress_moves_current_path_to_next_operation(tmp_path: Path) -> N
     root.withdraw()
     try:
         app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.PHONE
         app.adb = FakeTransfer()  # type: ignore[assignment]
         app.plan = build_sync_plan(
             phone_files=[
