@@ -196,6 +196,42 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "错误：{message}",
         Language.ENGLISH: "Error: {message}",
     },
+    "progress_idle": {
+        Language.CHINESE: "空闲",
+        Language.ENGLISH: "Idle",
+    },
+    "progress_x_of_n": {
+        Language.CHINESE: "进度：{index} / {total}",
+        Language.ENGLISH: "Progress: {index} / {total}",
+    },
+    "progress_eta_remaining": {
+        Language.CHINESE: "剩余约 {eta}",
+        Language.ENGLISH: "Remaining: ~ {eta}",
+    },
+    "progress_eta_unknown": {
+        Language.CHINESE: "剩余时间：计算中...",
+        Language.ENGLISH: "Remaining: calculating...",
+    },
+    "progress_current_file": {
+        Language.CHINESE: "正在处理：{path}",
+        Language.ENGLISH: "Current: {path}",
+    },
+    "progress_current_local": {
+        Language.CHINESE: "正在扫描硬盘文件夹",
+        Language.ENGLISH: "Scanning hard drive folder",
+    },
+    "progress_current_phone": {
+        Language.CHINESE: "正在扫描手机文件夹",
+        Language.ENGLISH: "Scanning phone folder",
+    },
+    "progress_complete": {
+        Language.CHINESE: "已完成",
+        Language.ENGLISH: "Done",
+    },
+    "progress_failed": {
+        Language.CHINESE: "失败",
+        Language.ENGLISH: "Failed",
+    },
 }
 
 CONFLICT_ACTION_LABELS: dict[ConflictAction, dict[Language, str]] = {

@@ -4,7 +4,7 @@ import queue
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, X, Listbox, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
+from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, X, Y, Listbox, Scrollbar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
 
 from syncfiles.adb import AdbClient, DeviceState, DeviceStatus
 from syncfiles.domain import (
@@ -26,6 +26,7 @@ from syncfiles.i18n import (
     text,
 )
 from syncfiles.local_fs import scan_local_folder
+from syncfiles.progress import ProgressMode, ProgressReporter, ProgressSnapshot, ProgressState, format_duration
 
 
 DEVICE_STATUS_TEXT_KEYS: dict[DeviceState, str] = {
@@ -77,6 +78,10 @@ class SyncFilesApp:
         self.language_label = StringVar(value=LANGUAGE_LABELS[self.language])
         self.status = StringVar(value=self._tr("device_status_unchecked"))
         self.log_queue: queue.Queue[str] = queue.Queue()
+        self.progress_queue: queue.Queue[ProgressSnapshot] = queue.Queue()
+        self.progress = ProgressReporter(on_change=self._enqueue_progress_snapshot)
+        self._current_snapshot: ProgressSnapshot | None = None
+        self._rendered_progress_mode = ProgressMode.DETERMINATE
         self.plan: SyncPlan | None = None
         self.conflict_choices: dict[str, ConflictAction] = {}
         self.device_status: DeviceStatus | None = None
@@ -85,6 +90,25 @@ class SyncFilesApp:
         self.tab_text_keys: list[tuple[object, str]] = []
         self._build_ui()
         self.root.after(100, self._drain_log_queue)
+        self.root.after(100, self._drain_progress_queue)
+
+    def _make_scrolled_list(self, parent: object, **listbox_kwargs: object) -> Listbox:
+        """Build a Listbox paired with a vertical Scrollbar.
+
+        Returns the Listbox so callers can keep referencing it as before.
+        The outer ``ttk.Frame`` (containing the Listbox and Scrollbar) is
+        attached as ``listbox._syncfiles_container`` so callers can pass it
+        to ``ttk.Notebook.add``. Extra keyword arguments are forwarded to
+        the ``Listbox`` constructor (e.g. ``width``, ``height``).
+        """
+        container = ttk.Frame(parent)
+        listbox = Listbox(container, exportselection=False, **listbox_kwargs)
+        scrollbar = ttk.Scrollbar(container, orient=VERTICAL, command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
+        listbox.pack(side=LEFT, fill=BOTH, expand=True)
+        scrollbar.pack(side=RIGHT, fill=Y)
+        listbox._syncfiles_container = container  # type: ignore[attr-defined]
+        return listbox
 
     def _build_ui(self) -> None:
         outer = ttk.Frame(self.root, padding=12)
@@ -130,15 +154,39 @@ class SyncFilesApp:
         self.sync_button = self._register(ttk.Button(actions, command=self.start_sync), "button_start_sync")
         self.sync_button.pack(side=LEFT, padx=8)
 
+        progress_box = ttk.Frame(outer)
+        progress_box.pack(fill=X, pady=(0, 8))
+        progress_box.columnconfigure(0, weight=1)
+        progress_box.columnconfigure(1, weight=1)
+        self.progress_status_label = self._register(ttk.Label(progress_box), "progress_idle")
+        self.progress_status_label.grid(row=0, column=0, sticky="w")
+        self.progress_eta_label = self._register(ttk.Label(progress_box), "progress_idle")
+        self.progress_eta_label.grid(row=0, column=1, sticky="e")
+        self.progress_bar = ttk.Progressbar(
+            progress_box, mode="determinate", maximum=1, value=0
+        )
+        self.progress_bar.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.progress_current_label = self._register(ttk.Label(progress_box), "progress_idle")
+        self.progress_current_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
         self.notebook = ttk.Notebook(outer)
         self.notebook.pack(fill=BOTH, expand=True)
-        self.phone_to_local_list = Listbox(self.notebook)
-        self.local_to_phone_list = Listbox(self.notebook)
-        self.conflict_list = Listbox(self.notebook)
+        self.phone_to_local_list = self._make_scrolled_list(self.notebook)
+        self.local_to_phone_list = self._make_scrolled_list(self.notebook)
+        self.conflict_list = self._make_scrolled_list(self.notebook)
         self.conflict_list.bind("<Double-Button-1>", self.choose_conflict_action)
-        self.notebook.add(self.phone_to_local_list, text=self._tr("tab_phone_to_local"))
-        self.notebook.add(self.local_to_phone_list, text=self._tr("tab_local_to_phone"))
-        self.notebook.add(self.conflict_list, text=self._tr("tab_conflicts"))
+        self.notebook.add(
+            self.phone_to_local_list._syncfiles_container,  # type: ignore[attr-defined]
+            text=self._tr("tab_phone_to_local"),
+        )
+        self.notebook.add(
+            self.local_to_phone_list._syncfiles_container,  # type: ignore[attr-defined]
+            text=self._tr("tab_local_to_phone"),
+        )
+        self.notebook.add(
+            self.conflict_list._syncfiles_container,  # type: ignore[attr-defined]
+            text=self._tr("tab_conflicts"),
+        )
         self.tab_text_keys = [
             (self.phone_to_local_list, "tab_phone_to_local"),
             (self.local_to_phone_list, "tab_local_to_phone"),
@@ -167,8 +215,9 @@ class SyncFilesApp:
         browser.title(self._tr("dialog_choose_phone"))
         current = StringVar(value=self.phone_root.get() or "/sdcard")
         ttk.Label(browser, textvariable=current).pack(fill=X, padx=8, pady=8)
-        listing = Listbox(browser, width=80, height=20)
-        listing.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        listing_container = ttk.Frame(browser)
+        listing_container.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        listing = self._make_scrolled_list(listing_container, width=80, height=20)
 
         def load(path: str) -> None:
             current.set(path)
@@ -222,12 +271,21 @@ class SyncFilesApp:
 
     def _scan_worker(self, local: Path, phone: str) -> None:
         self._log(self._tr("log_scanning_local"))
+        self.progress.start(
+            total=2,
+            current_path=self._tr("progress_current_local"),
+            mode=ProgressMode.INDETERMINATE,
+        )
         local_files = scan_local_folder(local)
+        self.progress.advance(current_path=self._tr("progress_current_phone"))
         self._log(self._tr("log_scanning_phone"))
         phone_files = self.adb.scan_phone_folder(phone)
         self.plan = build_sync_plan(phone_files=phone_files, local_files=local_files)
-        self.conflict_choices = {conflict.relative_path: ConflictAction.SKIP for conflict in self.plan.conflicts}
+        self.conflict_choices = {
+            conflict.relative_path: ConflictAction.SKIP for conflict in self.plan.conflicts
+        }
         self.root.after(0, self._render_plan)
+        self.progress.succeed()
 
     def _render_plan(self) -> None:
         self.phone_to_local_list.delete(0, END)
@@ -314,14 +372,27 @@ class SyncFilesApp:
         if self.plan is None:
             return
         operations = build_operations_from_plan(self.plan, self.conflict_choices)
-        executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
-        executor.execute_operations(operations)
-        for operation in operations:
-            if operation.source_side is SourceSide.LOCAL and operation.destination_side is SourceSide.PHONE:
-                self._log(self._tr("log_pushed", path=operation.relative_path))
-            elif operation.source_side is SourceSide.PHONE and operation.destination_side is SourceSide.LOCAL:
-                self._log(self._tr("log_pulled", path=operation.relative_path))
-        self._log(self._tr("log_sync_complete", count=len(operations)))
+        self.progress.start(
+            total=len(operations),
+            current_path=operations[0].relative_path if operations else None,
+        )
+        try:
+            def hook(operation: CopyOperation, _elapsed: float) -> None:
+                self.progress.advance(current_path=operation.relative_path)
+
+            executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
+            executor.execute_operations(operations, on_operation_complete=hook)
+            for operation in operations:
+                if operation.source_side is SourceSide.LOCAL and operation.destination_side is SourceSide.PHONE:
+                    self._log(self._tr("log_pushed", path=operation.relative_path))
+                elif operation.source_side is SourceSide.PHONE and operation.destination_side is SourceSide.LOCAL:
+                    self._log(self._tr("log_pulled", path=operation.relative_path))
+            self._log(self._tr("log_sync_complete", count=len(operations)))
+        except Exception:
+            self.progress.fail()
+            raise
+        else:
+            self.progress.succeed()
 
     def _run_background(self, target: Callable[[], None]) -> None:
         self._set_busy(True)
@@ -331,6 +402,7 @@ class SyncFilesApp:
                 target()
             except Exception as exc:
                 message = str(exc)
+                self.progress.fail()
                 self._log(self._tr("log_error", message=message))
                 self.root.after(0, lambda: messagebox.showerror(self._tr("dialog_error_title"), message))
             finally:
@@ -340,6 +412,74 @@ class SyncFilesApp:
 
     def _log(self, message: str) -> None:
         self.log_queue.put(message)
+
+    def _enqueue_progress_snapshot(self, snapshot: ProgressSnapshot) -> None:
+        self.progress_queue.put(snapshot)
+
+    def _drain_progress_queue(self) -> None:
+        latest: ProgressSnapshot | None = None
+        while True:
+            try:
+                latest = self.progress_queue.get_nowait()
+            except queue.Empty:
+                break
+        if latest is not None:
+            self._render_progress(latest)
+        self.root.after(100, self._drain_progress_queue)
+
+    def _render_progress(self, snapshot: ProgressSnapshot) -> None:
+        self._current_snapshot = snapshot
+        idle = self._tr("progress_idle")
+        target_mode = snapshot.mode if snapshot.state is ProgressState.RUNNING else ProgressMode.DETERMINATE
+        self._set_progress_mode(target_mode)
+        if snapshot.state is ProgressState.IDLE or snapshot.total <= 0:
+            self.progress_status_label.configure(text=idle)
+            self.progress_eta_label.configure(text="")
+            self.progress_current_label.configure(text="")
+            self.progress_bar.configure(value=0)
+            return
+        if snapshot.state is ProgressState.SUCCEEDED:
+            self.progress_status_label.configure(text=self._tr("progress_complete"))
+            self.progress_eta_label.configure(text="")
+            self.progress_current_label.configure(text="")
+            self.progress_bar.configure(value=1)
+            return
+        if snapshot.state is ProgressState.FAILED:
+            self.progress_status_label.configure(text=self._tr("progress_failed"))
+            self.progress_eta_label.configure(text="")
+            if snapshot.current_path:
+                self.progress_current_label.configure(
+                    text=self._tr("progress_current_file", path=snapshot.current_path)
+                )
+            else:
+                self.progress_current_label.configure(text="")
+            self.progress_bar.configure(value=snapshot.fraction)
+            return
+        self.progress_status_label.configure(
+            text=self._tr("progress_x_of_n", index=snapshot.completed, total=snapshot.total)
+        )
+        if snapshot.completed == 0:
+            self.progress_eta_label.configure(text=self._tr("progress_eta_unknown"))
+        else:
+            self.progress_eta_label.configure(
+                text=self._tr("progress_eta_remaining", eta=format_duration(snapshot.eta_seconds))
+            )
+        if snapshot.current_path:
+            self.progress_current_label.configure(
+                text=self._tr("progress_current_file", path=snapshot.current_path)
+            )
+        else:
+            self.progress_current_label.configure(text="")
+        self.progress_bar.configure(value=snapshot.fraction)
+
+    def _set_progress_mode(self, mode: ProgressMode) -> None:
+        if self._rendered_progress_mode is mode:
+            return
+        self.progress_bar.stop()
+        self.progress_bar.configure(mode=mode.value)
+        if mode is ProgressMode.INDETERMINATE:
+            self.progress_bar.start(80)
+        self._rendered_progress_mode = mode
 
     def _drain_log_queue(self) -> None:
         while not self.log_queue.empty():
@@ -359,6 +499,8 @@ class SyncFilesApp:
             self.notebook.tab(tab, text=self._tr(key))
         self._refresh_status()
         self._render_plan()
+        if self._current_snapshot is not None:
+            self._render_progress(self._current_snapshot)
 
     def _refresh_status(self) -> None:
         if self.device_status is None:
