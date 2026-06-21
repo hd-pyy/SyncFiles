@@ -56,6 +56,18 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "语言",
         Language.ENGLISH: "Language",
     },
+    "label_sync_mode": {
+        Language.CHINESE: "同步类型",
+        Language.ENGLISH: "Sync mode",
+    },
+    "sync_mode_hard_drive": {
+        Language.CHINESE: "硬盘 <-> 硬盘",
+        Language.ENGLISH: "Hard drive <-> hard drive",
+    },
+    "sync_mode_phone": {
+        Language.CHINESE: "硬盘 <-> 手机",
+        Language.ENGLISH: "Hard drive <-> phone",
+    },
     "button_check_device": {
         Language.CHINESE: "检查设备",
         Language.ENGLISH: "Check device",
@@ -63,6 +75,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "label_local_folder": {
         Language.CHINESE: "硬盘文件夹",
         Language.ENGLISH: "Hard drive folder",
+    },
+    "label_left_folder": {
+        Language.CHINESE: "左侧硬盘文件夹",
+        Language.ENGLISH: "Left hard drive folder",
+    },
+    "label_right_folder": {
+        Language.CHINESE: "右侧硬盘文件夹",
+        Language.ENGLISH: "Right hard drive folder",
     },
     "button_choose": {
         Language.CHINESE: "选择",
@@ -92,6 +112,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "硬盘 -> 手机",
         Language.ENGLISH: "Hard drive -> phone",
     },
+    "tab_left_to_right": {
+        Language.CHINESE: "左侧 -> 右侧",
+        Language.ENGLISH: "Left -> right",
+    },
+    "tab_right_to_left": {
+        Language.CHINESE: "右侧 -> 左侧",
+        Language.ENGLISH: "Right -> left",
+    },
     "tab_conflicts": {
         Language.CHINESE: "冲突",
         Language.ENGLISH: "Conflicts",
@@ -107,6 +135,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "dialog_choose_phone": {
         Language.CHINESE: "选择手机文件夹",
         Language.ENGLISH: "Choose phone folder",
+    },
+    "dialog_choose_right": {
+        Language.CHINESE: "选择右侧硬盘文件夹",
+        Language.ENGLISH: "Choose right hard drive folder",
     },
     "dialog_adb_error": {
         Language.CHINESE: "ADB 错误",

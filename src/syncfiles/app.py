@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 from collections.abc import Callable
+from enum import StrEnum
 from pathlib import Path
 from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, X, Y, Listbox, Scrollbar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
 
@@ -27,6 +28,11 @@ from syncfiles.i18n import (
 )
 from syncfiles.local_fs import scan_local_folder
 from syncfiles.progress import ProgressMode, ProgressReporter, ProgressSnapshot, ProgressState, format_duration
+
+
+class SyncMode(StrEnum):
+    HARD_DRIVE = "hard_drive"
+    PHONE = "phone"
 
 
 DEVICE_STATUS_TEXT_KEYS: dict[DeviceState, str] = {
@@ -76,6 +82,8 @@ class SyncFilesApp:
         self.local_root = StringVar()
         self.phone_root = StringVar(value="/sdcard")
         self.language_label = StringVar(value=LANGUAGE_LABELS[self.language])
+        self.sync_mode = SyncMode.HARD_DRIVE
+        self.mode_label = StringVar(value=self._sync_mode_label(self.sync_mode))
         self.status = StringVar(value=self._tr("device_status_unchecked"))
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.progress_queue: queue.Queue[ProgressSnapshot] = queue.Queue()
@@ -92,17 +100,16 @@ class SyncFilesApp:
         self.root.after(100, self._drain_log_queue)
         self.root.after(100, self._drain_progress_queue)
 
-    def _make_scrolled_list(self, parent: object, **listbox_kwargs: object) -> Listbox:
+    def _make_scrolled_list(self, parent: object) -> Listbox:
         """Build a Listbox paired with a vertical Scrollbar.
 
         Returns the Listbox so callers can keep referencing it as before.
         The outer ``ttk.Frame`` (containing the Listbox and Scrollbar) is
         attached as ``listbox._syncfiles_container`` so callers can pass it
-        to ``ttk.Notebook.add``. Extra keyword arguments are forwarded to
-        the ``Listbox`` constructor (e.g. ``width``, ``height``).
+        to ``ttk.Notebook.add``.
         """
         container = ttk.Frame(parent)
-        listbox = Listbox(container, exportselection=False, **listbox_kwargs)
+        listbox = Listbox(container, exportselection=False)
         scrollbar = ttk.Scrollbar(container, orient=VERTICAL, command=listbox.yview)
         listbox.configure(yscrollcommand=scrollbar.set)
         listbox.pack(side=LEFT, fill=BOTH, expand=True)
@@ -129,23 +136,39 @@ class SyncFilesApp:
         )
         language_selector.bind("<<ComboboxSelected>>", self.change_language)
         language_selector.pack(side=LEFT)
+        self._register(ttk.Label(top_row), "label_sync_mode").pack(side=LEFT, padx=(18, 4))
+        self.mode_selector = ttk.Combobox(
+            top_row,
+            textvariable=self.mode_label,
+            values=[
+                self._tr("sync_mode_hard_drive"),
+                self._tr("sync_mode_phone"),
+            ],
+            state="readonly",
+            width=20,
+        )
+        self.mode_selector.bind("<<ComboboxSelected>>", self.change_sync_mode)
+        self.mode_selector.pack(side=LEFT)
 
         local_row = ttk.Frame(outer)
         local_row.pack(fill=X, pady=4)
-        self._register(ttk.Label(local_row), "label_local_folder").pack(side=LEFT)
+        self.first_folder_label = self._register(ttk.Label(local_row), "label_left_folder")
+        self.first_folder_label.pack(side=LEFT)
         ttk.Entry(local_row, textvariable=self.local_root).pack(side=LEFT, fill=X, expand=True, padx=8)
         self.local_choose_button = self._register(ttk.Button(local_row, command=self.choose_local_folder), "button_choose")
         self.local_choose_button.pack(side=RIGHT)
 
         phone_row = ttk.Frame(outer)
         phone_row.pack(fill=X, pady=4)
-        self._register(ttk.Label(phone_row), "label_phone_folder").pack(side=LEFT)
+        self.second_folder_label = self._register(ttk.Label(phone_row), "label_right_folder")
+        self.second_folder_label.pack(side=LEFT)
         ttk.Entry(phone_row, textvariable=self.phone_root).pack(side=LEFT, fill=X, expand=True, padx=8)
-        self.phone_browse_button = self._register(
-            ttk.Button(phone_row, command=self.open_phone_browser),
-            "button_browse_phone",
+        self.second_choose_button = self._register(
+            ttk.Button(phone_row, command=self.choose_second_folder),
+            "button_choose",
         )
-        self.phone_browse_button.pack(side=RIGHT)
+        self.second_choose_button.pack(side=RIGHT)
+        self.phone_browse_button = self.second_choose_button
 
         actions = ttk.Frame(outer)
         actions.pack(fill=X, pady=8)
@@ -192,6 +215,7 @@ class SyncFilesApp:
             (self.local_to_phone_list, "tab_local_to_phone"),
             (self.conflict_list, "tab_conflicts"),
         ]
+        self._refresh_mode_ui()
 
         self._register(ttk.Label(outer), "label_log").pack(anchor="w", pady=(8, 0))
         self.log_list = Listbox(outer, height=8)
@@ -208,6 +232,16 @@ class SyncFilesApp:
         if selected:
             self.local_root.set(selected)
 
+    def choose_second_folder(self) -> None:
+        if self.sync_mode is SyncMode.PHONE:
+            self.open_phone_browser()
+            return
+        if self._warn_if_busy():
+            return
+        selected = filedialog.askdirectory(title=self._tr("dialog_choose_right"))
+        if selected:
+            self.phone_root.set(selected)
+
     def open_phone_browser(self) -> None:
         if self._warn_if_busy():
             return
@@ -217,7 +251,15 @@ class SyncFilesApp:
         ttk.Label(browser, textvariable=current).pack(fill=X, padx=8, pady=8)
         listing_container = ttk.Frame(browser)
         listing_container.pack(fill=BOTH, expand=True, padx=8, pady=8)
-        listing = self._make_scrolled_list(listing_container, width=80, height=20)
+        listing_container.columnconfigure(0, weight=1)
+        listing_container.rowconfigure(0, weight=1)
+        listing = Listbox(listing_container, width=80, height=20, exportselection=False)
+        scrollbar = ttk.Scrollbar(
+            listing_container, orient=VERTICAL, command=listing.yview
+        )
+        listing.configure(yscrollcommand=scrollbar.set)
+        listing.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns")
 
         def load(path: str) -> None:
             current.set(path)
@@ -500,16 +542,79 @@ class SyncFilesApp:
         self.language = LANGUAGE_BY_LABEL.get(self.language_label.get(), DEFAULT_LANGUAGE)
         self._refresh_language()
 
+    def change_sync_mode(self, _event: object | None = None) -> None:
+        if self._warn_if_busy():
+            self.mode_label.set(self._sync_mode_label(self.sync_mode))
+            return
+        self.sync_mode = self._sync_mode_from_label(self.mode_label.get())
+        self.plan = None
+        self.conflict_choices = {}
+        self._render_plan()
+        self._refresh_mode_ui()
+
     def _refresh_language(self) -> None:
         self.root.title(self._tr("app_title"))
+        self.mode_selector.configure(
+            values=[
+                self._tr("sync_mode_hard_drive"),
+                self._tr("sync_mode_phone"),
+            ]
+        )
         for widget, key in self.translatable_widgets:
             widget.configure(text=self._tr(key))
         for tab, key in self.tab_text_keys:
             self.notebook.tab(tab, text=self._tr(key))
+        self._refresh_mode_ui()
         self._refresh_status()
         self._render_plan()
         if self._current_snapshot is not None:
             self._render_progress(self._current_snapshot)
+
+    def _sync_mode_label(self, mode: SyncMode) -> str:
+        key = "sync_mode_phone" if mode is SyncMode.PHONE else "sync_mode_hard_drive"
+        return self._tr(key)
+
+    def _sync_mode_from_label(self, label: str) -> SyncMode:
+        return SyncMode.PHONE if label == self._tr("sync_mode_phone") else SyncMode.HARD_DRIVE
+
+    def _refresh_mode_ui(self) -> None:
+        self.mode_label.set(self._sync_mode_label(self.sync_mode))
+        if self.sync_mode is SyncMode.PHONE:
+            self.check_device_button.configure(state="disabled" if self.busy else "normal")
+            self.first_folder_label.configure(text=self._tr("label_local_folder"))
+            self.second_folder_label.configure(text=self._tr("label_phone_folder"))
+            self.second_choose_button.configure(
+                text=self._tr("button_browse_phone"),
+                command=self.open_phone_browser,
+            )
+            self.notebook.tab(
+                self.phone_to_local_list._syncfiles_container,  # type: ignore[attr-defined]
+                text=self._tr("tab_phone_to_local"),
+            )
+            self.notebook.tab(
+                self.local_to_phone_list._syncfiles_container,  # type: ignore[attr-defined]
+                text=self._tr("tab_local_to_phone"),
+            )
+        else:
+            self.check_device_button.configure(state="disabled")
+            self.first_folder_label.configure(text=self._tr("label_left_folder"))
+            self.second_folder_label.configure(text=self._tr("label_right_folder"))
+            self.second_choose_button.configure(
+                text=self._tr("button_choose"),
+                command=self.choose_second_folder,
+            )
+            self.notebook.tab(
+                self.phone_to_local_list._syncfiles_container,  # type: ignore[attr-defined]
+                text=self._tr("tab_right_to_left"),
+            )
+            self.notebook.tab(
+                self.local_to_phone_list._syncfiles_container,  # type: ignore[attr-defined]
+                text=self._tr("tab_left_to_right"),
+            )
+        self.notebook.tab(
+            self.conflict_list._syncfiles_container,  # type: ignore[attr-defined]
+            text=self._tr("tab_conflicts"),
+        )
 
     def _refresh_status(self) -> None:
         if self.device_status is None:
@@ -536,13 +641,13 @@ class SyncFilesApp:
         self.busy = busy
         state = "disabled" if busy else "normal"
         for button in (
-            self.check_device_button,
             self.local_choose_button,
-            self.phone_browse_button,
+            self.second_choose_button,
             self.scan_button,
             self.sync_button,
         ):
             button.configure(state=state)
+        self._refresh_mode_ui()
 
     def _warn_if_busy(self) -> bool:
         if not self.busy:

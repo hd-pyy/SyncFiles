@@ -2,6 +2,7 @@ from pathlib import Path
 import tkinter as tk
 
 from syncfiles.app import (
+    SyncMode,
     SyncFilesApp,
     build_operations_from_plan,
     default_language_label,
@@ -177,6 +178,50 @@ def test_drain_progress_queue_coalesces_multiple_snapshots() -> None:
         assert app._current_snapshot is not None
         assert app._current_snapshot.completed == 3
         assert float(app.progress_bar["value"]) == 0.75
+    finally:
+        root.destroy()
+
+
+def test_default_sync_mode_is_hard_drive_to_hard_drive() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+
+        assert app.sync_mode is SyncMode.HARD_DRIVE
+        assert app.mode_label.get() == text("sync_mode_hard_drive", app.language)
+        assert str(app.check_device_button["state"]) == "disabled"
+        assert app.second_folder_label.cget("text") == text("label_right_folder", app.language)
+        assert app.second_choose_button.cget("text") == text("button_choose", app.language)
+        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
+            "tab_right_to_left",
+            app.language,
+        )
+    finally:
+        root.destroy()
+
+
+def test_changing_sync_mode_updates_labels_and_clears_plan() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.plan = build_sync_plan(phone_files=[], local_files=[])
+        app.conflict_choices = {"x": ConflictAction.SKIP}
+
+        app.mode_label.set(text("sync_mode_phone", app.language))
+        app.change_sync_mode()
+
+        assert app.sync_mode is SyncMode.PHONE
+        assert app.plan is None
+        assert app.conflict_choices == {}
+        assert str(app.check_device_button["state"]) == "normal"
+        assert app.second_folder_label.cget("text") == text("label_phone_folder", app.language)
+        assert app.second_choose_button.cget("text") == text("button_browse_phone", app.language)
+        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
+            "tab_phone_to_local",
+            app.language,
+        )
     finally:
         root.destroy()
 
