@@ -314,6 +314,61 @@ def test_phone_mode_scan_still_uses_adb(tmp_path: Path) -> None:
         root.destroy()
 
 
+def test_hard_drive_mode_sync_copies_between_local_roots(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    (left / "left-only.txt").write_text("left", encoding="utf-8")
+    (right / "right-only.txt").write_text("right", encoding="utf-8")
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.HARD_DRIVE
+        app.plan = build_sync_plan(
+            phone_files=[
+                record("right-only.txt", 5, 1, SourceSide.PHONE),
+            ],
+            local_files=[
+                record("left-only.txt", 4, 1, SourceSide.LOCAL),
+            ],
+        )
+        app.conflict_choices = {}
+
+        app._sync_worker(left, str(right))
+
+        assert (right / "left-only.txt").read_text(encoding="utf-8") == "left"
+        assert (left / "right-only.txt").read_text(encoding="utf-8") == "right"
+    finally:
+        root.destroy()
+
+
+def test_phone_mode_sync_still_uses_adb_transfer(tmp_path: Path) -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.PHONE
+        app.adb = FakeTransfer()  # type: ignore[assignment]
+        app.plan = build_sync_plan(
+            phone_files=[
+                record("phone-only.txt", 5, 1, SourceSide.PHONE),
+            ],
+            local_files=[
+                record("local-only.txt", 4, 1, SourceSide.LOCAL),
+            ],
+        )
+        app.conflict_choices = {}
+
+        app._sync_worker(tmp_path / "local", "/sdcard/Test")
+
+        assert app.adb.pulls == [("/sdcard/Test/phone-only.txt", str(tmp_path / "local" / "phone-only.txt"))]
+        assert app.adb.pushes == [(str(tmp_path / "local" / "local-only.txt"), "/sdcard/Test/local-only.txt")]
+    finally:
+        root.destroy()
+
+
 def test_sync_progress_moves_current_path_to_next_operation(tmp_path: Path) -> None:
     root = tk.Tk()
     root.withdraw()

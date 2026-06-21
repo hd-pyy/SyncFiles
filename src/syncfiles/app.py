@@ -28,6 +28,7 @@ from syncfiles.i18n import (
     text,
 )
 from syncfiles.local_fs import scan_local_folder
+from syncfiles.local_executor import LocalSyncExecutor
 from syncfiles.progress import ProgressMode, ProgressReporter, ProgressSnapshot, ProgressState, format_duration
 
 
@@ -451,7 +452,10 @@ class SyncFilesApp:
                 )
                 self.progress.advance(current_path=next_path)
 
-            executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
+            if self.sync_mode is SyncMode.PHONE:
+                executor = SyncExecutor(adb=self.adb, local_root=local, phone_root=phone)
+            else:
+                executor = LocalSyncExecutor(left_root=local, right_root=Path(phone))
             executor.execute_operations(operations, on_operation_complete=hook)
             for operation in operations:
                 if operation.source_side is SourceSide.LOCAL and operation.destination_side is SourceSide.PHONE:
