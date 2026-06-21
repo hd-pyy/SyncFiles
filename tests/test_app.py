@@ -1,6 +1,8 @@
 from pathlib import Path
 import tkinter as tk
 
+import pytest
+
 from syncfiles.app import (
     SyncMode,
     SyncFilesApp,
@@ -16,7 +18,7 @@ from syncfiles.domain import (
     SourceSide,
     build_sync_plan,
 )
-from syncfiles.i18n import text
+from syncfiles.i18n import Language, text
 from syncfiles.progress import ProgressMode, ProgressSnapshot, ProgressState
 
 
@@ -45,6 +47,53 @@ class FakeTransfer:
 
 def record(path: str, size: int, modified: int, side: SourceSide) -> FileRecord:
     return FileRecord(relative_path=path, size=size, modified_time=modified, side=side)
+
+
+class FakeSftpSession:
+    def __init__(self, records: list[FileRecord] | None = None) -> None:
+        self.records = records or []
+        self.scans: list[str] = []
+        self.uploads: list[tuple[str, str]] = []
+        self.downloads: list[tuple[str, str]] = []
+        self.closed = False
+
+    def __enter__(self) -> "FakeSftpSession":
+        return self
+
+    def __exit__(self, _exc_type: object, _exc: object, _traceback: object) -> None:
+        self.closed = True
+
+    def scan_folder(self, remote_root: str, is_cancelled=None) -> list[FileRecord]:
+        self.scans.append(remote_root)
+        if is_cancelled is not None:
+            assert is_cancelled() is False
+        return self.records
+
+    def upload_file(self, local_path: Path, remote_path: str) -> None:
+        self.uploads.append((str(local_path), remote_path))
+
+    def download_file(self, remote_path: str, local_path: Path) -> None:
+        self.downloads.append((remote_path, str(local_path)))
+
+
+class FakeSftpClient:
+    def __init__(self, session: FakeSftpSession) -> None:
+        self.session = session
+        self.configs: list[object] = []
+
+    def connect(self, config: object) -> FakeSftpSession:
+        self.configs.append(config)
+        return self.session
+
+
+def configure_sftp_app(app: SyncFilesApp, remote_root: str = "/remote") -> None:
+    app.sync_mode = SyncMode.SFTP
+    app.sftp_host.set("example.com")
+    app.sftp_port.set("22")
+    app.sftp_username.set("alice")
+    app.sftp_password.set("secret")
+    app.phone_root.set(remote_root)
+    app._refresh_mode_ui()
 
 
 def test_build_operations_from_plan_includes_missing_files_and_conflict_choices() -> None:
@@ -263,6 +312,85 @@ def test_changing_sync_mode_updates_labels_and_clears_plan() -> None:
         root.destroy()
 
 
+def test_sftp_sync_mode_updates_labels_and_shows_connection_fields() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+
+        app.mode_label.set(text("sync_mode_sftp", app.language))
+        app.change_sync_mode()
+
+        assert app.sync_mode is SyncMode.SFTP
+        assert str(app.check_device_button["state"]) == "disabled"
+        assert app.first_folder_label.cget("text") == text("label_local_folder", app.language)
+        assert app.second_folder_label.cget("text") == text("label_sftp_remote_folder", app.language)
+        assert str(app.second_choose_button["state"]) == "disabled"
+        assert app.sftp_frame.winfo_manager() == "pack"
+        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
+            "tab_sftp_to_local",
+            app.language,
+        )
+    finally:
+        root.destroy()
+
+
+def test_refresh_language_updates_mode_selector_and_tabs() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+
+        app.language = Language.ENGLISH
+        app._refresh_language()
+
+        assert tuple(app.mode_selector["values"]) == (
+            text("sync_mode_hard_drive", Language.ENGLISH),
+            text("sync_mode_phone", Language.ENGLISH),
+            text("sync_mode_sftp", Language.ENGLISH),
+        )
+        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
+            "tab_right_to_left",
+            Language.ENGLISH,
+        )
+    finally:
+        root.destroy()
+
+
+def test_sftp_config_validation_requires_credentials() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.language = Language.ENGLISH
+        app.sync_mode = SyncMode.SFTP
+        app.phone_root.set("/remote")
+
+        with pytest.raises(ValueError, match="Enter SFTP host, username, password, and remote folder."):
+            app._sftp_config()
+    finally:
+        root.destroy()
+
+
+def test_sftp_config_validation_rejects_invalid_port() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.language = Language.ENGLISH
+        app.sync_mode = SyncMode.SFTP
+        app.sftp_host.set("example.com")
+        app.sftp_port.set("abc")
+        app.sftp_username.set("alice")
+        app.sftp_password.set("secret")
+        app.phone_root.set("/remote")
+
+        with pytest.raises(ValueError, match="Enter an SFTP port between 1 and 65535."):
+            app._sftp_config()
+    finally:
+        root.destroy()
+
+
 def test_render_failed_progress_does_not_show_done() -> None:
     root = tk.Tk()
     root.withdraw()
@@ -365,6 +493,34 @@ def test_phone_mode_scan_still_uses_adb(tmp_path: Path) -> None:
         root.destroy()
 
 
+def test_sftp_mode_scan_uses_sftp_client_not_adb(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    left.mkdir()
+    (left / "local-only.txt").write_text("left", encoding="utf-8")
+    session = FakeSftpSession(
+        [
+            record("remote-only.txt", 6, 1, SourceSide.PHONE),
+        ]
+    )
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        configure_sftp_app(app)
+        app.sftp_client = FakeSftpClient(session)  # type: ignore[assignment]
+        app.adb.scan_phone_folder = lambda _path: (_ for _ in ()).throw(AssertionError("ADB was used"))  # type: ignore[method-assign]
+
+        app._scan_worker(left, "/remote")
+
+        assert session.scans == ["/remote"]
+        assert session.closed is True
+        assert app.plan is not None
+        assert [item.relative_path for item in app.plan.local_to_phone] == ["local-only.txt"]
+        assert [item.relative_path for item in app.plan.phone_to_local] == ["remote-only.txt"]
+    finally:
+        root.destroy()
+
+
 def test_hard_drive_mode_sync_copies_between_local_roots(tmp_path: Path) -> None:
     left = tmp_path / "left"
     right = tmp_path / "right"
@@ -395,6 +551,36 @@ def test_hard_drive_mode_sync_copies_between_local_roots(tmp_path: Path) -> None
         root.destroy()
 
 
+def test_sftp_mode_sync_uses_sftp_executor(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    left.mkdir()
+    (left / "local-only.txt").write_text("left", encoding="utf-8")
+    session = FakeSftpSession()
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        configure_sftp_app(app)
+        app.sftp_client = FakeSftpClient(session)  # type: ignore[assignment]
+        app.plan = build_sync_plan(
+            phone_files=[
+                record("remote-only.txt", 6, 1, SourceSide.PHONE),
+            ],
+            local_files=[
+                record("local-only.txt", 4, 1, SourceSide.LOCAL),
+            ],
+        )
+        app.conflict_choices = {}
+
+        app._sync_worker(left, "/remote")
+
+        assert session.downloads == [("/remote/remote-only.txt", str(left / "remote-only.txt"))]
+        assert session.uploads == [(str(left / "local-only.txt"), "/remote/local-only.txt")]
+        assert session.closed is True
+    finally:
+        root.destroy()
+
+
 def test_phone_mode_sync_still_uses_adb_transfer(tmp_path: Path) -> None:
     root = tk.Tk()
     root.withdraw()
@@ -420,11 +606,25 @@ def test_phone_mode_sync_still_uses_adb_transfer(tmp_path: Path) -> None:
         root.destroy()
 
 
+def test_sftp_conflict_action_labels_follow_sync_mode() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.SFTP
+
+        assert app._conflict_action_label(ConflictAction.USE_PHONE) == text("conflict_use_sftp", app.language)
+        assert app._conflict_action_label(ConflictAction.USE_LOCAL) == text("conflict_use_hard_drive", app.language)
+    finally:
+        root.destroy()
+
+
 def test_sync_progress_moves_current_path_to_next_operation(tmp_path: Path) -> None:
     root = tk.Tk()
     root.withdraw()
     try:
         app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.PHONE
         app.adb = FakeTransfer()  # type: ignore[assignment]
         app.plan = build_sync_plan(
             phone_files=[

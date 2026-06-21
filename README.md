@@ -4,6 +4,7 @@ SyncFiles 是一个 Windows 优先的桌面同步工具,用于在两个文件夹
 
 - 硬盘 ↔ 硬盘
 - 硬盘 ↔ Android 手机(通过 ADB)
+- 硬盘 ↔ SFTP(用户名 + 密码)
 
 应用默认以中文启动,可在主窗口通过 `中文` / `English` 切换语言。
 
@@ -18,6 +19,7 @@ SyncFiles 是一个 Windows 优先的桌面同步工具,用于在两个文件夹
 - Python 3.11 或更高版本
 - Android Platform Tools,`adb` 在 `PATH` 中(仅手机同步模式需要)
 - 一台开启了 USB 调试并已授权的 Android 手机(仅手机同步模式需要)
+- SFTP 模式需要目标电脑开启 SSH/SFTP 服务,并准备好主机、端口、用户名、密码和远端文件夹路径
 
 > **最终用户无需满足以上条件。** 如果你只是想运行打包好的可执行文件,直接看 [打包好的 Windows 可执行文件](#打包好的-windows-可执行文件) 一节。
 
@@ -83,12 +85,13 @@ python -m syncfiles
 1. 使用手机同步模式时,先用 USB 连接 Android 手机
 2. 通过 `python -m syncfiles`(开发模式)或双击 `SyncFiles.exe`(打包模式)打开应用
 3. 如需切换语言,在顶部下拉框中选择 `中文` 或 `English`
-4. 选择同步模式(硬盘模式 / 手机模式)
+4. 选择同步模式(硬盘模式 / 手机模式 / SFTP 模式)
 5. 硬盘模式下,选择左侧和右侧硬盘文件夹
 6. 手机模式下,先点 **检查设备**,然后选择硬盘文件夹,从 `/sdcard` 浏览手机文件夹
-7. 点击 **扫描** 查看差异
-8. 双击冲突项,选择保留方式
-9. 确认预览无误后,点击 **开始同步**
+7. SFTP 模式下,选择硬盘文件夹,填写主机、端口、用户名、密码和远端文件夹路径
+8. 点击 **扫描** 查看差异
+9. 双击冲突项,选择保留方式
+10. 确认预览无误后,点击 **开始同步**
 
 ## 目录结构
 
@@ -101,6 +104,8 @@ src/syncfiles/
   executor.py            # 同步操作调度
   local_executor.py      # 硬盘-硬盘执行器
   local_fs.py            # 本地文件系统工具
+  sftp.py                # SFTP 连接、扫描、上传、下载
+  sftp_executor.py       # 硬盘-SFTP 执行器
   progress.py            # 进度报告(线程安全)
   i18n.py                # 中英文翻译
   adb_fallback/          # adb 二进制(构建时填充,不入库)
@@ -115,4 +120,4 @@ SyncFiles.spec           # PyInstaller 配置
 python -m pytest
 ```
 
-测试套件覆盖 adb 客户端、领域逻辑、UI 控件、进度模型等。`tests/test_adb.py` 使用 `FakeRunner` 隔离真实 adb 进程,无需连接真机。
+测试套件覆盖 adb 客户端、SFTP 适配器、领域逻辑、UI 控件、进度模型等。`tests/test_adb.py` 使用 `FakeRunner` 隔离真实 adb 进程,`tests/test_sftp.py` 使用 fake SFTP session 隔离真实网络连接。

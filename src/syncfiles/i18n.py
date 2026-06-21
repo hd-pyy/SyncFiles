@@ -68,6 +68,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "硬盘 <-> 手机",
         Language.ENGLISH: "Hard drive <-> phone",
     },
+    "sync_mode_sftp": {
+        Language.CHINESE: "硬盘 <-> SFTP",
+        Language.ENGLISH: "Hard drive <-> SFTP",
+    },
     "button_check_device": {
         Language.CHINESE: "检查设备",
         Language.ENGLISH: "Check device",
@@ -91,6 +95,26 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "label_phone_folder": {
         Language.CHINESE: "手机文件夹",
         Language.ENGLISH: "Phone folder",
+    },
+    "label_sftp_host": {
+        Language.CHINESE: "主机",
+        Language.ENGLISH: "Host",
+    },
+    "label_sftp_port": {
+        Language.CHINESE: "端口",
+        Language.ENGLISH: "Port",
+    },
+    "label_sftp_username": {
+        Language.CHINESE: "用户名",
+        Language.ENGLISH: "Username",
+    },
+    "label_sftp_password": {
+        Language.CHINESE: "密码",
+        Language.ENGLISH: "Password",
+    },
+    "label_sftp_remote_folder": {
+        Language.CHINESE: "SFTP 远端文件夹",
+        Language.ENGLISH: "SFTP remote folder",
     },
     "button_browse_phone": {
         Language.CHINESE: "浏览手机",
@@ -123,6 +147,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "tab_right_to_left": {
         Language.CHINESE: "右侧 -> 左侧",
         Language.ENGLISH: "Right -> left",
+    },
+    "tab_sftp_to_local": {
+        Language.CHINESE: "SFTP -> 硬盘",
+        Language.ENGLISH: "SFTP -> hard drive",
+    },
+    "tab_local_to_sftp": {
+        Language.CHINESE: "硬盘 -> SFTP",
+        Language.ENGLISH: "Hard drive -> SFTP",
     },
     "tab_conflicts": {
         Language.CHINESE: "冲突",
@@ -172,6 +204,18 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "当前正在扫描或同步，请等待完成后再操作。",
         Language.ENGLISH: "A scan or sync is already running. Wait for it to finish.",
     },
+    "dialog_sftp_config_title": {
+        Language.CHINESE: "SFTP 配置不完整",
+        Language.ENGLISH: "Incomplete SFTP configuration",
+    },
+    "error_sftp_missing_fields": {
+        Language.CHINESE: "请输入 SFTP 主机、用户名、密码和远端文件夹。",
+        Language.ENGLISH: "Enter SFTP host, username, password, and remote folder.",
+    },
+    "error_sftp_invalid_port": {
+        Language.CHINESE: "请输入 1 到 65535 之间的 SFTP 端口。",
+        Language.ENGLISH: "Enter an SFTP port between 1 and 65535.",
+    },
     "dialog_no_phone_selection_title": {
         Language.CHINESE: "未选择文件夹",
         Language.ENGLISH: "No folder selected",
@@ -200,6 +244,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "正在扫描手机文件夹...",
         Language.ENGLISH: "Scanning phone folder...",
     },
+    "log_scanning_sftp": {
+        Language.CHINESE: "正在扫描 SFTP 远端文件夹...",
+        Language.ENGLISH: "Scanning SFTP remote folder...",
+    },
     "log_scan_complete": {
         Language.CHINESE: "扫描完成：{phone_to_local} 个手机到硬盘，{local_to_phone} 个硬盘到手机，{conflicts} 个冲突。",
         Language.ENGLISH: "Scan complete: {phone_to_local} phone-to-hard-drive, {local_to_phone} hard-drive-to-phone, {conflicts} conflicts.",
@@ -207,6 +255,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "log_scan_complete_hard_drive": {
         Language.CHINESE: "扫描完成：{phone_to_local} 个右侧到左侧，{local_to_phone} 个左侧到右侧，{conflicts} 个冲突。",
         Language.ENGLISH: "Scan complete: {phone_to_local} right-to-left, {local_to_phone} left-to-right, {conflicts} conflicts.",
+    },
+    "log_scan_complete_sftp": {
+        Language.CHINESE: "扫描完成：{phone_to_local} 个 SFTP 到硬盘，{local_to_phone} 个硬盘到 SFTP，{conflicts} 个冲突。",
+        Language.ENGLISH: "Scan complete: {phone_to_local} SFTP-to-hard-drive, {local_to_phone} hard-drive-to-SFTP, {conflicts} conflicts.",
     },
     "dialog_conflict_action": {
         Language.CHINESE: "冲突处理",
@@ -243,6 +295,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "log_pulled": {
         Language.CHINESE: "已拉取 {path}",
         Language.ENGLISH: "Pulled {path}",
+    },
+    "log_uploaded_sftp": {
+        Language.CHINESE: "已上传到 SFTP：{path}",
+        Language.ENGLISH: "Uploaded to SFTP: {path}",
+    },
+    "log_downloaded_sftp": {
+        Language.CHINESE: "已从 SFTP 下载：{path}",
+        Language.ENGLISH: "Downloaded from SFTP: {path}",
     },
     "log_copied_left_to_right": {
         Language.CHINESE: "已复制 左 -> 右：{path}",
@@ -292,6 +352,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "正在扫描手机文件夹",
         Language.ENGLISH: "Scanning phone folder",
     },
+    "progress_current_sftp": {
+        Language.CHINESE: "正在扫描 SFTP 远端文件夹",
+        Language.ENGLISH: "Scanning SFTP remote folder",
+    },
     "progress_current_right": {
         Language.CHINESE: "正在扫描右侧硬盘文件夹",
         Language.ENGLISH: "Scanning right hard drive folder",
@@ -335,6 +399,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "conflict_use_phone": {
         Language.CHINESE: "使用手机版本",
         Language.ENGLISH: "Use phone version",
+    },
+    "conflict_use_sftp": {
+        Language.CHINESE: "使用 SFTP 版本",
+        Language.ENGLISH: "Use SFTP version",
     },
     "conflict_use_hard_drive": {
         Language.CHINESE: "使用硬盘版本",

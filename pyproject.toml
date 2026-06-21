@@ -7,7 +7,7 @@ name = "syncfiles"
 version = "0.1.0"
 description = "Desktop ADB folder synchronization helper"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["paramiko>=3"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
