@@ -4,6 +4,7 @@ __pycache__/
 .pytest-tmp/
 .pytest-run/
 .pytest-run-cache/
+.worktrees/
 *.egg-info/
 
 # PyInstaller build artifacts
