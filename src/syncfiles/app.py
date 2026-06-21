@@ -12,6 +12,7 @@ from syncfiles.domain import (
     ConflictAction,
     ConflictDecision,
     CopyOperation,
+    FileRecord,
     SourceSide,
     SyncPlan,
     build_sync_plan,
@@ -312,22 +313,41 @@ class SyncFilesApp:
         self._run_background(lambda: self._scan_worker(Path(local), phone))
 
     def _scan_worker(self, local: Path, phone: str) -> None:
-        self._log(self._tr("log_scanning_local"))
+        self._log(self._tr("log_scanning_local" if self.sync_mode is SyncMode.PHONE else "log_scanning_left"))
         self.progress.start(
             total=2,
             current_path=self._tr("progress_current_local"),
             mode=ProgressMode.INDETERMINATE,
         )
         local_files = scan_local_folder(local)
-        self.progress.advance(current_path=self._tr("progress_current_phone"))
-        self._log(self._tr("log_scanning_phone"))
-        phone_files = self.adb.scan_phone_folder(phone)
-        self.plan = build_sync_plan(phone_files=phone_files, local_files=local_files)
+        self.progress.advance(
+            current_path=self._tr(
+                "progress_current_phone" if self.sync_mode is SyncMode.PHONE else "progress_current_right"
+            )
+        )
+        second_files = self._scan_second_folder(phone)
+        self.plan = build_sync_plan(phone_files=second_files, local_files=local_files)
         self.conflict_choices = {
             conflict.relative_path: ConflictAction.SKIP for conflict in self.plan.conflicts
         }
         self.root.after(0, self._render_plan)
         self.progress.succeed()
+
+    def _scan_second_folder(self, second: str) -> list[FileRecord]:
+        if self.sync_mode is SyncMode.PHONE:
+            self._log(self._tr("log_scanning_phone"))
+            return self.adb.scan_phone_folder(second)
+        self._log(self._tr("log_scanning_right"))
+        records = scan_local_folder(Path(second))
+        return [
+            FileRecord(
+                relative_path=record.relative_path,
+                size=record.size,
+                modified_time=record.modified_time,
+                side=SourceSide.PHONE,
+            )
+            for record in records
+        ]
 
     def _render_plan(self) -> None:
         self.phone_to_local_list.delete(0, END)

@@ -180,6 +180,14 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "正在扫描硬盘文件夹...",
         Language.ENGLISH: "Scanning hard drive folder...",
     },
+    "log_scanning_left": {
+        Language.CHINESE: "正在扫描左侧硬盘文件夹...",
+        Language.ENGLISH: "Scanning left hard drive folder...",
+    },
+    "log_scanning_right": {
+        Language.CHINESE: "正在扫描右侧硬盘文件夹...",
+        Language.ENGLISH: "Scanning right hard drive folder...",
+    },
     "log_scanning_phone": {
         Language.CHINESE: "正在扫描手机文件夹...",
         Language.ENGLISH: "Scanning phone folder...",
@@ -255,6 +263,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "progress_current_phone": {
         Language.CHINESE: "正在扫描手机文件夹",
         Language.ENGLISH: "Scanning phone folder",
+    },
+    "progress_current_right": {
+        Language.CHINESE: "正在扫描右侧硬盘文件夹",
+        Language.ENGLISH: "Scanning right hard drive folder",
     },
     "progress_complete": {
         Language.CHINESE: "已完成",

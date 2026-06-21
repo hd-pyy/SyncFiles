@@ -255,6 +255,8 @@ def test_scan_worker_does_not_touch_progressbar_from_worker_thread(tmp_path: Pat
     root.withdraw()
     try:
         app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.PHONE
+        app._refresh_mode_ui()
         app.progress_bar = ExplodingProgressBar()  # type: ignore[assignment]
         local = tmp_path / "local"
         local.mkdir()
@@ -266,6 +268,48 @@ def test_scan_worker_does_not_touch_progressbar_from_worker_thread(tmp_path: Pat
         while not app.progress_queue.empty():
             drained.append(app.progress_queue.get_nowait())
         assert drained[-1].state is ProgressState.SUCCEEDED
+    finally:
+        root.destroy()
+
+
+def test_hard_drive_mode_scans_two_local_folders(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    (left / "left-only.txt").write_text("left", encoding="utf-8")
+    (right / "right-only.txt").write_text("right", encoding="utf-8")
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.local_root.set(str(left))
+        app.phone_root.set(str(right))
+
+        app._scan_worker(left, str(right))
+
+        assert app.plan is not None
+        assert [item.relative_path for item in app.plan.local_to_phone] == ["left-only.txt"]
+        assert [item.relative_path for item in app.plan.phone_to_local] == ["right-only.txt"]
+    finally:
+        root.destroy()
+
+
+def test_phone_mode_scan_still_uses_adb(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    left.mkdir()
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.PHONE
+        app._refresh_mode_ui()
+        captured: list[str] = []
+        app.adb.scan_phone_folder = lambda phone: captured.append(phone) or []  # type: ignore[method-assign]
+
+        app._scan_worker(left, "/sdcard/DCIM")
+
+        assert captured == ["/sdcard/DCIM"]
     finally:
         root.destroy()
 
