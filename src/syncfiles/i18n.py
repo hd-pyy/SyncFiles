@@ -144,49 +144,41 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "右侧硬盘",
         Language.ENGLISH: "Right hard drive",
     },
-    "pane_center_header": {
-        Language.CHINESE: "操作",
-        Language.ENGLISH: "Action",
-    },
-    "col_left_name": {
-        Language.CHINESE: "名称",
-        Language.ENGLISH: "Name",
-    },
-    "col_right_name": {
-        Language.CHINESE: "名称",
-        Language.ENGLISH: "Name",
-    },
-    "col_size": {
-        Language.CHINESE: "大小",
-        Language.ENGLISH: "Size",
-    },
-    "col_mtime": {
-        Language.CHINESE: "修改时间",
-        Language.ENGLISH: "Modified",
-    },
     "arrow_left_to_right": {
-        Language.CHINESE: "→  左侧 → 右侧",
-        Language.ENGLISH: "→  Left → right",
+        Language.CHINESE: "→  左侧到右侧",
+        Language.ENGLISH: "→  Left to right",
     },
     "arrow_right_to_left": {
-        Language.CHINESE: "←  右侧 → 左侧",
-        Language.ENGLISH: "←  Right → left",
+        Language.CHINESE: "←  右侧到左侧",
+        Language.ENGLISH: "←  Right to left",
     },
     "toggle_show_identical": {
         Language.CHINESE: "显示无差异文件",
         Language.ENGLISH: "Show identical files",
     },
-    "direction_glyph_left_to_right": {
-        Language.CHINESE: "→",
-        Language.ENGLISH: "→",
+    "group_different_files": {
+        Language.CHINESE: "不同文件 ({count})",
+        Language.ENGLISH: "Different files ({count})",
     },
-    "direction_glyph_right_to_left": {
-        Language.CHINESE: "←",
-        Language.ENGLISH: "←",
+    "group_conflict_files": {
+        Language.CHINESE: "冲突文件 ({count})",
+        Language.ENGLISH: "Conflict files ({count})",
     },
-    "direction_glyph_conflict": {
-        Language.CHINESE: "!",
-        Language.ENGLISH: "!",
+    "group_identical_files": {
+        Language.CHINESE: "无差异文件 ({count})",
+        Language.ENGLISH: "Identical files ({count})",
+    },
+    "meta_with_date_size": {
+        Language.CHINESE: "{date} · {size}",
+        Language.ENGLISH: "{date} · {size}",
+    },
+    "meta_left_updated": {
+        Language.CHINESE: "左侧更新: {date} · {size}",
+        Language.ENGLISH: "Left updated: {date} · {size}",
+    },
+    "meta_right_updated": {
+        Language.CHINESE: "右侧更新: {date} · {size}",
+        Language.ENGLISH: "Right updated: {date} · {size}",
     },
     "label_log": {
         Language.CHINESE: "日志",

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from tkinter import BOTH, BooleanVar, END, LEFT, RIGHT, VERTICAL, X, Y, Listbox, Scrollbar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
+from tkinter import BOTH, BooleanVar, END, LEFT, RIGHT, TOP, VERTICAL, X, Y, Listbox, Scrollbar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
 from typing import NamedTuple
 
 from syncfiles.adb import AdbClient, DeviceState, DeviceStatus
@@ -270,6 +270,9 @@ class SyncFilesApp:
         self.arrow_button_keys: list[tuple[ttk.Button, str]] = []
         self.checkbox_keys: list[tuple[ttk.Checkbutton, str]] = []
         self._build_ui()
+        # Apply the initial active-button bold so the default direction is
+        # visible before the user has run a scan.
+        self._refresh_arrow_buttons()
         self.root.after(100, self._drain_log_queue)
         self.root.after(100, self._drain_progress_queue)
         # Wake the adb-server daemon right after the UI is up so the first
@@ -380,95 +383,112 @@ class SyncFilesApp:
         self.progress_current_label = self._register(ttk.Label(progress_box), "progress_idle")
         self.progress_current_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        # Two-pane aligned Treeview replaces the old 3-tab notebook. Rows are
-        # aligned by relative_path; conflicts show red, side-only files blue,
-        # and identical files are hidden behind a checkbox (off by default).
+        # Two-pane grouped Treeview. Layout (top to bottom):
+        #   row 0: pane title row  (left title — spacer — right title)
+        #   row 1: toolbar         (checkbox on left — vertical arrow buttons on right)
+        #   row 2: the Treeview itself, with 3 columns (left / center / right)
+        #          plus the "#0" tree column that holds expand/collapse triangles.
+        # The center column is narrow and shows nothing in the row — the actual
+        # arrow buttons live in the toolbar's column-2 zone, visually above the
+        # tree's center.
         self.pane_container = ttk.Frame(outer)
         self.pane_container.pack(fill=BOTH, expand=True)
+        self.pane_container.columnconfigure(0, weight=1)
+        self.pane_container.columnconfigure(1, weight=0)
+        self.pane_container.columnconfigure(2, weight=0)
+        self.pane_container.columnconfigure(3, weight=1)
+        self.pane_container.rowconfigure(2, weight=1)
 
-        # Header row: left pane title | spacer | center "Action" | right pane title.
+        # Pane title row.
         header_row = ttk.Frame(self.pane_container)
-        header_row.pack(fill=X)
+        header_row.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 4))
         self.left_pane_header = ttk.Label(header_row)
-        self.left_pane_header.pack(side=LEFT, padx=(0, 8))
-        self._register(ttk.Label(header_row), "pane_center_header").pack(side=LEFT, expand=True)
+        self.left_pane_header.pack(side=LEFT)
+        ttk.Frame(header_row).pack(side=LEFT, expand=True, fill=X)
         self.right_pane_header = ttk.Label(header_row)
-        self.right_pane_header.pack(side=RIGHT, padx=(8, 0))
+        self.right_pane_header.pack(side=RIGHT)
         self.pane_label_keys = [
             (self.left_pane_header, "pane_left_header_phone"),
             (self.right_pane_header, "pane_right_header_phone"),
         ]
 
-        # Arrow row: [→] | checkbox | [←]. The active direction is bolded by
-        # configure(style=...) at render time.
-        arrow_row = ttk.Frame(self.pane_container)
-        arrow_row.pack(fill=X, pady=(2, 6))
-        self.left_to_right_button = ttk.Button(
-            arrow_row, command=self._flip_to_left_to_right
-        )
-        self.left_to_right_button.pack(side=LEFT, padx=4)
+        # Toolbar row: [checkbox] .................................. [arrow][arrow]
+        toolbar = ttk.Frame(self.pane_container)
+        toolbar.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(0, 4))
+        toolbar.columnconfigure(0, weight=1)
+        toolbar.columnconfigure(1, weight=0)
         self.show_identical_var = BooleanVar(value=self.show_identical)
         self.show_identical_checkbox = ttk.Checkbutton(
-            arrow_row,
+            toolbar,
             variable=self.show_identical_var,
             command=self._on_show_identical_toggle,
         )
-        self.show_identical_checkbox.pack(side=LEFT, padx=12)
+        self.show_identical_checkbox.grid(row=0, column=0, sticky="w")
+        arrow_zone = ttk.Frame(toolbar)
+        arrow_zone.grid(row=0, column=1, sticky="e")
+        # The "right_to_left" arrow goes on top (default active), the
+        # "left_to_right" arrow on the bottom — same visual order as the
+        # user's screenshot.
         self.right_to_left_button = ttk.Button(
-            arrow_row, command=self._flip_to_right_to_left
+            arrow_zone, command=self._flip_to_right_to_left, width=3
         )
-        self.right_to_left_button.pack(side=RIGHT, padx=4)
+        self.right_to_left_button.pack(side=TOP, pady=1)
+        self.left_to_right_button = ttk.Button(
+            arrow_zone, command=self._flip_to_left_to_right, width=3
+        )
+        self.left_to_right_button.pack(side=TOP, pady=1)
         self.arrow_button_keys = [
-            (self.left_to_right_button, "arrow_left_to_right"),
             (self.right_to_left_button, "arrow_right_to_left"),
+            (self.left_to_right_button, "arrow_left_to_right"),
         ]
         self.checkbox_keys = [
             (self.show_identical_checkbox, "toggle_show_identical"),
         ]
 
-        # Treeview body.
-        body = ttk.Frame(self.pane_container)
-        body.pack(fill=BOTH, expand=True)
-        body.columnconfigure(0, weight=1)
-        body.rowconfigure(0, weight=1)
-        columns = (
-            "left_name", "left_size", "left_mtime",
-            "direction",
-            "right_name", "right_size", "right_mtime",
+        # Treeview body. show="tree headings" exposes the #0 (tree) column for
+        # the expand/collapse triangle; the 3 data columns carry the file
+        # cells. The center column is intentionally narrow and empty in every
+        # row — it just reserves space so the row text doesn't crowd the
+        # arrow buttons visually.
+        self.tree = ttk.Treeview(
+            self.pane_container,
+            columns=("left", "center", "right"),
+            show="tree headings",
+            selectmode="browse",
         )
-        self.tree = ttk.Treeview(body, columns=columns, show="headings", selectmode="browse")
-        for col, key, width, anchor in [
-            ("left_name", "col_left_name", 320, "w"),
-            ("left_size", "col_size", 80, "e"),
-            ("left_mtime", "col_mtime", 140, "e"),
-            ("direction", "pane_center_header", 60, "center"),
-            ("right_name", "col_right_name", 320, "w"),
-            ("right_size", "col_size", 80, "e"),
-            ("right_mtime", "col_mtime", 140, "e"),
-        ]:
-            self.tree.heading(col, text=self._tr(key))
-            self.tree.column(col, width=width, anchor=anchor, stretch=True)
+        self.tree.heading("#0", text="")
+        self.tree.heading("left", text=self._tr("label_left_folder"))
+        self.tree.heading("center", text="")
+        self.tree.heading("right", text=self._tr("label_right_folder"))
+        self.tree.column("#0", width=24, stretch=False)
+        self.tree.column("left", width=380, anchor="w", stretch=True)
+        self.tree.column("center", width=24, anchor="center", stretch=False)
+        self.tree.column("right", width=380, anchor="w", stretch=True)
+        # Two-line rows need a taller row height. ``rowheight`` is a style
+        # option on the Treeview, not a configure() option on the widget.
+        ttk.Style().configure("Treeview", rowheight=44)
         self.column_heading_keys = [
-            ("left_name", "col_left_name"),
-            ("left_size", "col_size"),
-            ("left_mtime", "col_mtime"),
-            ("direction", "pane_center_header"),
-            ("right_name", "col_right_name"),
-            ("right_size", "col_size"),
-            ("right_mtime", "col_mtime"),
+            ("left", "label_left_folder"),
+            ("right", "label_right_folder"),
         ]
-        # Row tags drive foreground color by status.
-        self.tree.tag_configure("phone_only", foreground="#1f6feb")        # blue
-        self.tree.tag_configure("local_only", foreground="#1f6feb")        # blue
-        self.tree.tag_configure("conflict", foreground="#d1242f")          # red
-        self.tree.tag_configure("resolved_conflict", foreground="#1a7f37") # dark green
-        self.tree.tag_configure("identical", foreground="#6e7781")         # gray
-        self.tree.bind("<<TreeviewSelect>>", self._on_tree_row_selected)
-        self.tree.bind("<Double-Button-1>", self._on_tree_row_activated)
-        self.tree.grid(row=0, column=0, sticky="nsew")
-        scroll = ttk.Scrollbar(body, orient=VERTICAL, command=self.tree.yview)
+        # Group/band/row tags.
+        self.tree.tag_configure("group_header", font=("", 10, "bold"))
+        self.tree.tag_configure("band_different", background="#ddf4ff")
+        self.tree.tag_configure("band_conflict", background="#ffe0e6")
+        self.tree.tag_configure("band_identical", background="#eeeeee")
+        self.tree.tag_configure("row_different", foreground="#0a4a8a")
+        self.tree.tag_configure("row_conflict", foreground="#a01030")
+        self.tree.tag_configure("row_conflict_resolved", foreground="#0a7030")
+        self.tree.tag_configure("row_identical", foreground="#888888")
+        # Map used to look up the _RowView for a clicked iid (relative_path).
+        self._row_views_by_path: dict[str, _RowView] = {}
+        self.tree.bind("<Double-Button-1>", self._on_tree_double_click)
+        self.tree.grid(row=2, column=0, columnspan=4, sticky="nsew")
+        scroll = ttk.Scrollbar(
+            self.pane_container, orient=VERTICAL, command=self.tree.yview
+        )
         self.tree.configure(yscrollcommand=scroll.set)
-        scroll.grid(row=0, column=1, sticky="ns")
+        scroll.grid(row=2, column=4, sticky="ns")
 
         # Keep these around as None so any stale test attribute lookup doesn't
         # AttributeError; tests that read them should be rewritten (see plan).
@@ -696,32 +716,42 @@ class SyncFilesApp:
 
     def _render_plan(self) -> None:
         # Wipe any previous render; deleting all children of the root "" node
-        # empties the Treeview in one call.
-        for iid in self.tree.get_children():
+        # empties the Treeview in one call. _row_views_by_path is reset so a
+        # subsequent double-click can't look up a stale iid.
+        for iid in self.tree.get_children(""):
             self.tree.delete(iid)
-        self._selected_row_path = ""
+        self._row_views_by_path = {}
         if self.plan is None:
             return
 
-        rows = _build_row_views(self.plan)
-        for row in rows:
-            if row.status == "identical" and not self.show_identical:
-                continue
-            tags = self._row_tags(row)
-            self.tree.insert(
-                "",
-                END,
-                iid=row.relative_path,
-                values=(
-                    row.phone.relative_path if row.phone else "",
-                    _format_size(row.phone.size) if row.phone else "",
-                    _format_mtime(row.phone.modified_time) if row.phone else "",
-                    _direction_glyph_for_row(row, self.sync_direction),
-                    row.local.relative_path if row.local else "",
-                    _format_size(row.local.size) if row.local else "",
-                    _format_mtime(row.local.modified_time) if row.local else "",
-                ),
-                tags=tags,
+        views = _build_row_views(self.plan)
+        different = [v for v in views if v.status in ("phone_only", "local_only")]
+        conflicts = [v for v in views if v.status == "conflict"]
+        identical = [v for v in views if v.status == "identical"]
+
+        if different:
+            self._populate_group(
+                "group_different",
+                "group_different_files",
+                "band_different",
+                "row_different",
+                different,
+            )
+        if conflicts:
+            self._populate_group(
+                "group_conflict",
+                "group_conflict_files",
+                "band_conflict",
+                "row_conflict",
+                conflicts,
+            )
+        if self.show_identical_var.get() and identical:
+            self._populate_group(
+                "group_identical",
+                "group_identical_files",
+                "band_identical",
+                "row_identical",
+                identical,
             )
 
         scan_complete_key = (
@@ -737,16 +767,80 @@ class SyncFilesApp:
         )
         self._refresh_arrow_buttons()
 
-    def _row_tags(self, row: _RowView) -> tuple[str, ...]:
-        """Resolve the Treeview row tags for a given row.
+    def _populate_group(
+        self,
+        group_iid: str,
+        label_key: str,
+        band_tag: str,
+        row_tag: str,
+        views: list[_RowView],
+    ) -> None:
+        """Insert one section header, a colored band row, and N data rows.
 
-        Conflicts whose user choice is anything other than SKIP are shown in
-        dark green to confirm the resolution; unresolved conflicts stay red.
+        Layout inside the group:
+          group header (iid=group_iid, text=label, open=True)
+            ├── band row (iid=__group_X_band, values=("", "", ""), tag=band_tag)
+            ├── data row 1 (iid=relative_path, values=(left, "", right), tag=row_tag)
+            ├── data row 2
+            └── ...
         """
-        if row.status == "conflict":
-            action = self.conflict_choices.get(row.relative_path, ConflictAction.SKIP)
-            return ("resolved_conflict",) if action is not ConflictAction.SKIP else ("conflict",)
-        return (row.status,)
+        label = self._tr(label_key, count=len(views))
+        self.tree.insert(
+            "", "end", iid=group_iid, text=label, open=True, tags=("group_header",)
+        )
+        self.tree.insert(
+            group_iid,
+            "end",
+            iid=f"__{group_iid}_band",
+            values=("", "", ""),
+            tags=(band_tag,),
+        )
+        for view in views:
+            resolved_tag = row_tag
+            if view.status == "conflict":
+                action = self.conflict_choices.get(
+                    view.relative_path, ConflictAction.SKIP
+                )
+                if action in (
+                    ConflictAction.USE_PHONE,
+                    ConflictAction.USE_LOCAL,
+                    ConflictAction.KEEP_BOTH,
+                ):
+                    resolved_tag = "row_conflict_resolved"
+            left_cell = self._format_cell(view, side="left")
+            right_cell = self._format_cell(view, side="right")
+            self.tree.insert(
+                group_iid,
+                "end",
+                iid=view.relative_path,
+                values=(left_cell, "", right_cell),
+                tags=(resolved_tag,),
+            )
+            self._row_views_by_path[view.relative_path] = view
+
+    def _format_cell(self, view: _RowView, side: str) -> str:
+        """Build the two-line cell text for one side of a row.
+
+        ``side="right"`` maps to the phone side (because the phone root sits
+        in the right folder picker) and ``side="left"`` maps to the local
+        side. Conflict rows get the "左侧更新: ..." / "右侧更新: ..." prefix
+        because both sides have a copy; non-conflict rows just show the
+        date and size. The phone side of a local-only row is empty (and
+        vice versa) to keep the visual asymmetry the user wants.
+        """
+        record = view.phone if side == "right" else view.local
+        if record is None:
+            return ""
+        if view.status == "conflict":
+            key = "meta_right_updated" if side == "right" else "meta_left_updated"
+        else:
+            key = "meta_with_date_size"
+        meta = self._tr(
+            key,
+            date=_format_mtime(record.modified_time),
+            size=_format_size(record.size),
+        )
+        return f"{view.relative_path}\n{meta}"
 
     def _refresh_arrow_buttons(self) -> None:
         """Visually mark the active direction button as bold."""
@@ -761,40 +855,47 @@ class SyncFilesApp:
 
     def _flip_to_left_to_right(self) -> None:
         self.sync_direction = "left_to_right"
-        self._render_plan()
+        # Direction is a UI-only affordance; no data changes, so no need to
+        # re-render the tree. Just refresh the bold state of the buttons.
+        self._refresh_arrow_buttons()
 
     def _flip_to_right_to_left(self) -> None:
         self.sync_direction = "right_to_left"
-        self._render_plan()
+        self._refresh_arrow_buttons()
 
     def _on_show_identical_toggle(self) -> None:
         self.show_identical = bool(self.show_identical_var.get())
         self._render_plan()
 
-    def _on_tree_row_selected(self, _event: object = None) -> None:
-        iid = self.tree.focus()
+    def _on_tree_double_click(self, event: object) -> None:
+        """Toggle a group's open state, or open the conflict popup.
+
+        Double-clicking a group header OR its colored band row toggles
+        fold/expand. Double-clicking a data row opens the conflict popup
+        if the row is a conflict; non-conflict rows do nothing.
+        """
+        iid = self.tree.identify_row(event.y)  # type: ignore[attr-defined]
         if not iid:
             return
-        self._selected_row_path = iid
-
-    def _on_tree_row_activated(self, _event: object = None) -> None:
-        if self.plan is None:
+        # Group header or band row → toggle parent open state.
+        if iid.startswith("group_") or iid.startswith("__group_"):
+            target = iid if iid.startswith("group_") else self.tree.parent(iid)
+            if target:
+                self.tree.item(target, open=not bool(self.tree.item(target, "open")))
             return
-        path = getattr(self, "_selected_row_path", "") or self.tree.focus()
-        if not path:
+        # Data row → conflict popup if applicable.
+        view = self._row_views_by_path.get(iid)
+        if view is None:
             return
-        # Find the matching conflict; non-conflict rows do nothing on dbl-click.
-        for conflict in self.plan.conflicts:
-            if conflict.relative_path == path:
-                self._open_conflict_popup(conflict)
-                return
+        if view.status == "conflict" and view.phone is not None and view.local is not None:
+            self._open_conflict_popup(view)
 
     def choose_conflict_action(self, _event: object | None = None) -> None:
-        # Legacy entry point: only fires if some test still wires it. The
-        # primary path is now _on_tree_row_activated → _open_conflict_popup.
+        # Legacy entry point: kept for the old <Double-Button-1> binding path
+        # that some tests may still wire. The primary path is now
+        # _on_tree_double_click → _open_conflict_popup(view).
         if self.plan is None:
             return
-        # Use selected row's iid if available; fall back to first conflict.
         path = getattr(self, "_selected_row_path", "")
         for conflict in self.plan.conflicts:
             if conflict.relative_path == path:
@@ -803,12 +904,24 @@ class SyncFilesApp:
         if self.plan.conflicts:
             self._open_conflict_popup(self.plan.conflicts[0])
 
-    def _open_conflict_popup(self, conflict: Conflict) -> None:
+    def _open_conflict_popup(self, view_or_conflict: object) -> None:
         """Open the 4-button resolution popup for one conflict row.
 
-        The popup records the choice in ``self.conflict_choices`` and then
-        re-renders so the row's color shifts from red → dark green.
+        Accepts either a ``Conflict`` (legacy) or a ``_RowView`` (new design,
+        from _on_tree_double_click) — the latter is the primary path.
+        Re-renders after the user picks so the row's color shifts from
+        red → dark green.
         """
+        if isinstance(view_or_conflict, Conflict):
+            conflict = view_or_conflict
+        else:
+            view = view_or_conflict
+            assert view.phone is not None and view.local is not None
+            conflict = Conflict(
+                relative_path=view.relative_path,
+                phone=view.phone,
+                local=view.local,
+            )
         window = Toplevel(self.root)
         window.title(self._tr("dialog_conflict_action"))
         ttk.Label(window, text=conflict.relative_path).pack(fill=X, padx=12, pady=8)

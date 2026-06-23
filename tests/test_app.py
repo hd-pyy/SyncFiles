@@ -458,102 +458,177 @@ def _file(path: str, size: int = 10, modified: int = 100, side: SourceSide = Sou
     return FileRecord(relative_path=path, size=size, modified_time=modified, side=side)
 
 
-def test_dual_pane_treeview_aligns_rows_by_relative_path() -> None:
+def test_grouped_treeview_shows_different_and_conflict_sections() -> None:
+    """A scan with phone-only, local-only, and conflict rows produces
+    two group headers (different + conflict) with one band row each and
+    the data rows as children of their group."""
     root = tk.Tk()
     root.withdraw()
     try:
         app = SyncFilesApp(root)
         app.plan = build_sync_plan(
-            phone_files=[_file("a.txt", side=SourceSide.PHONE)],
-            local_files=[_file("a.txt", size=99, side=SourceSide.LOCAL)],  # conflict
+            phone_files=[
+                _file("phone-only.jpg", 1, 10, SourceSide.PHONE),
+                _file("conflict.txt", 1, 10, SourceSide.PHONE),
+            ],
+            local_files=[
+                _file("local-only.txt", 2, 20, SourceSide.LOCAL),
+                _file("conflict.txt", 3, 30, SourceSide.LOCAL),
+            ],
         )
         app._render_plan()
-        iids = list(app.tree.get_children())
-        # Conflict path appears in sorted order, tagged as conflict.
-        assert iids == ["a.txt"]
-        assert app.tree.item("a.txt", "tags") == ("conflict",)
+
+        top_level = list(app.tree.get_children(""))
+        assert "group_different" in top_level
+        assert "group_conflict" in top_level
+        assert "group_identical" not in top_level  # toggle off by default
+
+        diff_children = list(app.tree.get_children("group_different"))
+        assert "__group_different_band" in diff_children
+        assert "phone-only.jpg" in diff_children
+        assert "local-only.txt" in diff_children
+        assert "conflict.txt" not in diff_children  # lives under the conflict group
+
+        conflict_children = list(app.tree.get_children("group_conflict"))
+        assert "__group_conflict_band" in conflict_children
+        assert "conflict.txt" in conflict_children
     finally:
         root.destroy()
 
 
-def test_identical_files_are_hidden_by_default() -> None:
+def test_grouped_treeview_collapses_and_expands() -> None:
+    """Each group header toggles independently via tree.item(iid, open=...)."""
     root = tk.Tk()
     root.withdraw()
     try:
         app = SyncFilesApp(root)
         app.plan = build_sync_plan(
-            phone_files=[_file("same.bin", size=42, modified=200, side=SourceSide.PHONE)],
-            local_files=[_file("same.bin", size=42, modified=200, side=SourceSide.LOCAL)],
+            phone_files=[_file("phone-only.jpg", 1, 10, SourceSide.PHONE)],
+            local_files=[_file("local-only.txt", 2, 20, SourceSide.LOCAL)],
         )
         app._render_plan()
-        # Default: identical files are hidden.
-        assert list(app.tree.get_children()) == []
 
-        # Toggle on, identical row appears with the "identical" tag.
+        assert bool(app.tree.item("group_different", "open")) is True
+        app.tree.item("group_different", open=False)
+        assert bool(app.tree.item("group_different", "open")) is False
+        app.tree.item("group_different", open=True)
+        assert bool(app.tree.item("group_different", "open")) is True
+    finally:
+        root.destroy()
+
+
+def test_compact_row_shows_filename_and_meta_on_two_lines() -> None:
+    """Each cell contains 'filename\\ndate · size' so the two lines render
+    in the row's taller rowheight."""
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.plan = build_sync_plan(
+            phone_files=[],
+            local_files=[_file("docs/readme.txt", 2_500_000, 1719080400, SourceSide.LOCAL)],
+        )
+        app._render_plan()
+
+        values = app.tree.item("docs/readme.txt", "values")
+        # local-only row → left cell has filename\nmeta, right cell empty.
+        assert values[0].startswith("docs/readme.txt\n")
+        assert "2024-06-22" in values[0]  # _format_mtime of epoch 1719080400 UTC
+        assert "2.4 MB" in values[0]
+        assert values[2] == ""  # right (phone) cell is empty
+    finally:
+        root.destroy()
+
+
+def test_show_identical_toggle_creates_identical_group() -> None:
+    """Toggling the checkbox creates a third 'identical' group with the
+    gray band and the matching file as a child."""
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.plan = build_sync_plan(
+            phone_files=[_file("same.bin", 42, 200, SourceSide.PHONE)],
+            local_files=[_file("same.bin", 42, 200, SourceSide.LOCAL)],
+        )
+        app._render_plan()
+        assert "group_identical" not in list(app.tree.get_children(""))
+
         app.show_identical_var.set(True)
         app._on_show_identical_toggle()
-        assert list(app.tree.get_children()) == ["same.bin"]
-        assert app.tree.item("same.bin", "tags") == ("identical",)
+        top_level = list(app.tree.get_children(""))
+        assert "group_identical" in top_level
+        same_children = list(app.tree.get_children("group_identical"))
+        assert "same.bin" in same_children
+        assert "__group_identical_band" in same_children
     finally:
         root.destroy()
 
 
-def test_clicking_arrow_button_flips_sync_direction() -> None:
+def test_arrow_button_flips_direction_and_bolds_active() -> None:
+    """Flipping the direction updates the sync_direction state and bolds
+    the newly active button (style="Active.TButton")."""
     root = tk.Tk()
     root.withdraw()
     try:
         app = SyncFilesApp(root)
-        # phone-only: file lives on the phone side; direction is locked to →
-        app.plan = build_sync_plan(
-            phone_files=[_file("phone.txt", side=SourceSide.PHONE)],
-            local_files=[],
-        )
-        app._render_plan()
         assert app.sync_direction == "right_to_left"
-        # Flipping direction does NOT change the row's source (phone-only
-        # rows are direction-invariant); the value in the direction column
-        # stays "→" because the file must always be pulled from the phone.
-        assert app.tree.item("phone.txt", "values")[3] == "→"
+        # Default: right-to-left button is active.
+        assert app.right_to_left_button.cget("style") == "Active.TButton"
+        assert app.left_to_right_button.cget("style") == "TButton"
 
-        # Toggle the direction; arrow state changes; row glyph is unchanged
-        # because the source side hasn't changed.
         app._flip_to_left_to_right()
         assert app.sync_direction == "left_to_right"
-        assert app.tree.item("phone.txt", "values")[3] == "→"
+        assert app.left_to_right_button.cget("style") == "Active.TButton"
+        assert app.right_to_left_button.cget("style") == "TButton"
     finally:
         root.destroy()
 
 
-def test_double_clicking_conflict_row_records_decision_and_recolors(monkeypatch) -> None:
+def test_conflict_row_double_click_opens_popup(monkeypatch) -> None:
+    """Double-clicking a conflict row routes to _open_conflict_popup with
+    the row's _RowView. The popup is replaced by a fake that records the
+    relative_path and applies USE_LOCAL."""
     root = tk.Tk()
     root.withdraw()
     try:
         app = SyncFilesApp(root)
         app.plan = build_sync_plan(
-            phone_files=[_file("a.txt", side=SourceSide.PHONE)],
-            local_files=[_file("a.txt", size=99, side=SourceSide.LOCAL)],
+            phone_files=[_file("a.txt", 1, 10, SourceSide.PHONE)],
+            local_files=[_file("a.txt", 3, 30, SourceSide.LOCAL)],
         )
         app._render_plan()
-        # Select the conflict row, then dbl-click.
-        app.tree.selection_set("a.txt")
-        app.tree.focus("a.txt")
-        app._selected_row_path = "a.txt"
 
-        # Capture the action callback the popup would have invoked.
-        chosen: dict[str, ConflictAction] = {}
+        captured: dict[str, str] = {}
 
-        def fake_popup(self_app, conflict):
-            chosen[conflict.relative_path] = ConflictAction.USE_LOCAL
-            self_app.conflict_choices[conflict.relative_path] = ConflictAction.USE_LOCAL
-            self_app._render_plan()
+        def fake_popup(view_or_conflict):
+            # New design passes the _RowView directly.
+            captured["rel"] = view_or_conflict.relative_path
+            app.conflict_choices[view_or_conflict.relative_path] = ConflictAction.USE_LOCAL
+            app._render_plan()
 
-        monkeypatch.setattr(SyncFilesApp, "_open_conflict_popup", fake_popup)
-        app._on_tree_row_activated()
+        monkeypatch.setattr(app, "_open_conflict_popup", fake_popup)
 
-        assert chosen == {"a.txt": ConflictAction.USE_LOCAL}
+        # Synthesize a double-click event on the conflict row.
+        class _FakeEvent:
+            y = 0
+
+        # The click must identify the iid, which depends on bbox; we
+        # exercise the data-row branch by directly calling the handler
+        # with an event whose y lands on the row. Simpler: directly call
+        # _on_tree_double_click with a row whose identify_row would
+        # return the conflict iid. Use the public test seam instead:
+        # verify the popup is called when we route through identify_row
+        # for an existing iid. We monkey-patch identify_row to lie.
+        monkeypatch.setattr(
+            app.tree, "identify_row", lambda _y: "a.txt"
+        )
+        app._on_tree_double_click(_FakeEvent())
+
+        assert captured == {"rel": "a.txt"}
         assert app.conflict_choices["a.txt"] is ConflictAction.USE_LOCAL
         # Resolved conflict renders green, not red.
-        assert app.tree.item("a.txt", "tags") == ("resolved_conflict",)
+        assert app.tree.item("a.txt", "tags") == ("row_conflict_resolved",)
     finally:
         root.destroy()
 
