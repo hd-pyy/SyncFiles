@@ -4,7 +4,10 @@ import tkinter as tk
 from syncfiles.app import (
     SyncMode,
     SyncFilesApp,
+    _build_row_views,
+    _direction_glyph_for_row,
     build_operations_from_plan,
+    build_operations_from_view,
     default_language_label,
     folder_basename,
     folders_share_basename,
@@ -230,10 +233,9 @@ def test_default_sync_mode_is_hard_drive_to_hard_drive() -> None:
         assert str(app.check_device_button["state"]) == "disabled"
         assert app.second_folder_label.cget("text") == text("label_right_folder", app.language)
         assert app.second_choose_button.cget("text") == text("button_choose", app.language)
-        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
-            "tab_right_to_left",
-            app.language,
-        )
+        # The new dual-pane UI uses one header label per side, not notebook tabs.
+        assert app.left_pane_header.cget("text") == text("pane_left_header_hard_drive", app.language)
+        assert app.right_pane_header.cget("text") == text("pane_right_header_hard_drive", app.language)
     finally:
         root.destroy()
 
@@ -255,10 +257,8 @@ def test_changing_sync_mode_updates_labels_and_clears_plan() -> None:
         assert str(app.check_device_button["state"]) == "normal"
         assert app.second_folder_label.cget("text") == text("label_phone_folder", app.language)
         assert app.second_choose_button.cget("text") == text("button_browse_phone", app.language)
-        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
-            "tab_phone_to_local",
-            app.language,
-        )
+        assert app.left_pane_header.cget("text") == text("pane_left_header_phone", app.language)
+        assert app.right_pane_header.cget("text") == text("pane_right_header_phone", app.language)
     finally:
         root.destroy()
 
@@ -449,3 +449,125 @@ def test_sync_progress_moves_current_path_to_next_operation(tmp_path: Path) -> N
         assert running_paths == ["phone-a.jpg", "phone-b.jpg", None]
     finally:
         root.destroy()
+
+
+# --- New dual-pane UI tests --------------------------------------------------
+
+
+def _file(path: str, size: int = 10, modified: int = 100, side: SourceSide = SourceSide.PHONE) -> FileRecord:
+    return FileRecord(relative_path=path, size=size, modified_time=modified, side=side)
+
+
+def test_dual_pane_treeview_aligns_rows_by_relative_path() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.plan = build_sync_plan(
+            phone_files=[_file("a.txt", side=SourceSide.PHONE)],
+            local_files=[_file("a.txt", size=99, side=SourceSide.LOCAL)],  # conflict
+        )
+        app._render_plan()
+        iids = list(app.tree.get_children())
+        # Conflict path appears in sorted order, tagged as conflict.
+        assert iids == ["a.txt"]
+        assert app.tree.item("a.txt", "tags") == ("conflict",)
+    finally:
+        root.destroy()
+
+
+def test_identical_files_are_hidden_by_default() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.plan = build_sync_plan(
+            phone_files=[_file("same.bin", size=42, modified=200, side=SourceSide.PHONE)],
+            local_files=[_file("same.bin", size=42, modified=200, side=SourceSide.LOCAL)],
+        )
+        app._render_plan()
+        # Default: identical files are hidden.
+        assert list(app.tree.get_children()) == []
+
+        # Toggle on, identical row appears with the "identical" tag.
+        app.show_identical_var.set(True)
+        app._on_show_identical_toggle()
+        assert list(app.tree.get_children()) == ["same.bin"]
+        assert app.tree.item("same.bin", "tags") == ("identical",)
+    finally:
+        root.destroy()
+
+
+def test_clicking_arrow_button_flips_sync_direction() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        # phone-only: file lives on the phone side; direction is locked to →
+        app.plan = build_sync_plan(
+            phone_files=[_file("phone.txt", side=SourceSide.PHONE)],
+            local_files=[],
+        )
+        app._render_plan()
+        assert app.sync_direction == "right_to_left"
+        # Flipping direction does NOT change the row's source (phone-only
+        # rows are direction-invariant); the value in the direction column
+        # stays "→" because the file must always be pulled from the phone.
+        assert app.tree.item("phone.txt", "values")[3] == "→"
+
+        # Toggle the direction; arrow state changes; row glyph is unchanged
+        # because the source side hasn't changed.
+        app._flip_to_left_to_right()
+        assert app.sync_direction == "left_to_right"
+        assert app.tree.item("phone.txt", "values")[3] == "→"
+    finally:
+        root.destroy()
+
+
+def test_double_clicking_conflict_row_records_decision_and_recolors(monkeypatch) -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.plan = build_sync_plan(
+            phone_files=[_file("a.txt", side=SourceSide.PHONE)],
+            local_files=[_file("a.txt", size=99, side=SourceSide.LOCAL)],
+        )
+        app._render_plan()
+        # Select the conflict row, then dbl-click.
+        app.tree.selection_set("a.txt")
+        app.tree.focus("a.txt")
+        app._selected_row_path = "a.txt"
+
+        # Capture the action callback the popup would have invoked.
+        chosen: dict[str, ConflictAction] = {}
+
+        def fake_popup(self_app, conflict):
+            chosen[conflict.relative_path] = ConflictAction.USE_LOCAL
+            self_app.conflict_choices[conflict.relative_path] = ConflictAction.USE_LOCAL
+            self_app._render_plan()
+
+        monkeypatch.setattr(SyncFilesApp, "_open_conflict_popup", fake_popup)
+        app._on_tree_row_activated()
+
+        assert chosen == {"a.txt": ConflictAction.USE_LOCAL}
+        assert app.conflict_choices["a.txt"] is ConflictAction.USE_LOCAL
+        # Resolved conflict renders green, not red.
+        assert app.tree.item("a.txt", "tags") == ("resolved_conflict",)
+    finally:
+        root.destroy()
+
+
+def test_operations_reflect_phone_only_and_local_only_rows() -> None:
+    plan = build_sync_plan(
+        phone_files=[_file("phone_only.txt", side=SourceSide.PHONE)],
+        local_files=[_file("local_only.txt", side=SourceSide.LOCAL)],
+    )
+    rows = _build_row_views(plan)
+    ops = build_operations_from_view(rows, conflict_choices={})
+    # Two operations, one per status, in the right direction.
+    by_path = {op.relative_path: op for op in ops}
+    assert by_path["phone_only.txt"].source_side is SourceSide.PHONE
+    assert by_path["phone_only.txt"].destination_side is SourceSide.LOCAL
+    assert by_path["local_only.txt"].source_side is SourceSide.LOCAL
+    assert by_path["local_only.txt"].destination_side is SourceSide.PHONE
