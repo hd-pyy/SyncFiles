@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from collections.abc import Callable
+from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, VERTICAL, X, Y, Listbox, Scrollbar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
+from tkinter import BOTH, BooleanVar, END, LEFT, RIGHT, VERTICAL, X, Y, Listbox, Scrollbar, StringVar, Tk, Toplevel, filedialog, messagebox, ttk
+from typing import NamedTuple
 
 from syncfiles.adb import AdbClient, DeviceState, DeviceStatus
 from syncfiles.domain import (
+    Conflict,
     ConflictAction,
     ConflictDecision,
     CopyOperation,
@@ -95,6 +99,133 @@ def folders_share_basename(local: str, other: str) -> bool:
     return local_name == other_name
 
 
+class _RowView(NamedTuple):
+    """One aligned row in the dual-pane Treeview.
+
+    Each row represents a single ``relative_path`` across the two folders.
+    Either ``phone`` or ``local`` may be ``None`` when the file exists only
+    on the opposite side. ``status`` picks the row tag (red / blue / gray).
+    """
+
+    relative_path: str
+    phone: FileRecord | None
+    local: FileRecord | None
+    status: str  # "phone_only" | "local_only" | "conflict" | "identical"
+
+
+def _build_row_views(plan: SyncPlan) -> list[_RowView]:
+    """Flatten a SyncPlan into a single sorted list of aligned rows.
+
+    The sorted union of every relative_path across all four buckets is
+    iterated exactly once. Each path produces one ``_RowView`` regardless
+    of which bucket it came from, which is what gives the Treeview its
+    left/right alignment by filename.
+    """
+    phone_only = {f.relative_path: f for f in plan.phone_to_local}
+    local_only = {f.relative_path: f for f in plan.local_to_phone}
+    conflicts = {c.relative_path: c for c in plan.conflicts}
+    identical = {f.relative_path: f for f in plan.identical}
+
+    rows: list[_RowView] = []
+    all_paths = sorted(
+        phone_only.keys() | local_only.keys() | conflicts.keys() | identical.keys()
+    )
+    for path in all_paths:
+        if path in conflicts:
+            conflict = conflicts[path]
+            rows.append(_RowView(path, conflict.phone, conflict.local, "conflict"))
+        elif path in phone_only:
+            rows.append(_RowView(path, phone_only[path], None, "phone_only"))
+        elif path in local_only:
+            rows.append(_RowView(path, None, local_only[path], "local_only"))
+        elif path in identical:
+            rows.append(_RowView(path, identical[path], identical[path], "identical"))
+    return rows
+
+
+def _format_size(size: int) -> str:
+    """Render a file size for the Treeview's size column."""
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    if size < 1024 * 1024 * 1024:
+        return f"{size / (1024 * 1024):.1f} MB"
+    return f"{size / (1024 * 1024 * 1024):.1f} GB"
+
+
+def _format_mtime(epoch_seconds: int) -> str:
+    """Render a Unix timestamp as a sortable, locale-neutral YYYY-MM-DD HH:MM."""
+    return datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def _direction_glyph_for_row(row: _RowView, sync_direction: str) -> str:
+    """Pick the symbol shown in the Treeview's center "Action" column.
+
+    Conflict rows show ``!`` because the user resolves them in a popup.
+    Side-only rows always show the symbol of the direction that *would*
+    copy the file — phone_only rows always read from the phone, local_only
+    rows always read from local, regardless of the global direction toggle.
+    Identical rows show ``-`` to signal "nothing to do".
+    """
+    if row.status == "conflict":
+        return "!"
+    if row.status == "identical":
+        return "-"
+    if row.status == "phone_only":
+        return "→"  # the phone side has it → flow points to local
+    if row.status == "local_only":
+        return "←"  # the local side has it → flow points to phone
+    return ""
+
+
+def build_operations_from_view(
+    views: list[_RowView],
+    conflict_choices: dict[str, ConflictAction],
+) -> list[CopyOperation]:
+    """Translate a rendered Treeview row list into CopyOperations.
+
+    Side-only rows are direction-invariant: a phone_only row is always a
+    pull (phone → local) and a local_only row is always a push (local →
+    phone). The global sync_direction toggle does not flip these because
+    flipping them would mean "push a phone file to itself" / "pull a
+    local file from itself", which is meaningless.
+    """
+    operations: list[CopyOperation] = []
+    # Walk the views once and bucket per status; identical rows produce no
+    # operation and are skipped here.
+    phone_only_paths: dict[str, FileRecord] = {}
+    local_only_paths: dict[str, FileRecord] = {}
+    conflict_paths: set[str] = set()
+    for row in views:
+        if row.status == "phone_only" and row.phone is not None:
+            phone_only_paths[row.relative_path] = row.phone
+        elif row.status == "local_only" and row.local is not None:
+            local_only_paths[row.relative_path] = row.local
+        elif row.status == "conflict":
+            conflict_paths.add(row.relative_path)
+
+    for path, _record in phone_only_paths.items():
+        operations.append(CopyOperation(path, SourceSide.PHONE, SourceSide.LOCAL))
+    for path, _record in local_only_paths.items():
+        operations.append(CopyOperation(path, SourceSide.LOCAL, SourceSide.PHONE))
+
+    # Re-derive a minimal Conflict list from views so resolve_conflicts can
+    # apply the user's choices (USE_PHONE / USE_LOCAL / KEEP_BOTH / SKIP).
+    from syncfiles.domain import Conflict
+    minimal_conflicts = [
+        Conflict(relative_path=r.relative_path, phone=r.phone, local=r.local)
+        for r in views
+        if r.status == "conflict" and r.phone is not None and r.local is not None
+    ]
+    decisions_map = {
+        path: ConflictDecision(relative_path=path, action=conflict_choices.get(path, ConflictAction.SKIP))
+        for path in conflict_paths
+    }
+    operations.extend(resolve_conflicts(minimal_conflicts, decisions_map))
+    return operations
+
+
 class SyncFilesApp:
     def __init__(self, root: Tk) -> None:
         self.root = root
@@ -106,6 +237,7 @@ class SyncFilesApp:
         self.root.geometry("620x780")
         self.root.minsize(520, 600)
         self.adb = AdbClient()
+        logging.getLogger("syncfiles.adb").info("[adb] using %s", self.adb.adb_path)
         self.local_root = StringVar()
         self.phone_root = StringVar(value="/sdcard")
         self.language_label = StringVar(value=LANGUAGE_LABELS[self.language])
@@ -119,6 +251,12 @@ class SyncFilesApp:
         self._rendered_progress_mode = ProgressMode.DETERMINATE
         self.plan: SyncPlan | None = None
         self.conflict_choices: dict[str, ConflictAction] = {}
+        # Default sync direction is "right_to_left" — the most common case is
+        # pulling new files off the phone (right) onto the hard drive (left).
+        # The two big arrow buttons flip this; per-row action is then derived
+        # from (sync_direction, row.status) inside _render_plan.
+        self.sync_direction: str = "right_to_left"
+        self.show_identical: bool = False
         self.device_status: DeviceStatus | None = None
         self.busy = False
         # Worker threads poll this between every cancellable step. Cleared by
@@ -126,7 +264,11 @@ class SyncFilesApp:
         # only thing that flips it during a run.
         self._cancel_event = threading.Event()
         self.translatable_widgets: list[tuple[object, str]] = []
-        self.tab_text_keys: list[tuple[object, str]] = []
+        self.tab_text_keys: list[tuple[object, str]] = []  # legacy, kept for back-compat
+        self.pane_label_keys: list[tuple[ttk.Label, str]] = []
+        self.column_heading_keys: list[tuple[str, str]] = []
+        self.arrow_button_keys: list[tuple[ttk.Button, str]] = []
+        self.checkbox_keys: list[tuple[ttk.Checkbutton, str]] = []
         self._build_ui()
         self.root.after(100, self._drain_log_queue)
         self.root.after(100, self._drain_progress_queue)
@@ -238,29 +380,103 @@ class SyncFilesApp:
         self.progress_current_label = self._register(ttk.Label(progress_box), "progress_idle")
         self.progress_current_label.grid(row=2, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        self.notebook = ttk.Notebook(outer)
-        self.notebook.pack(fill=BOTH, expand=True)
-        self.phone_to_local_list = self._make_scrolled_list(self.notebook)
-        self.local_to_phone_list = self._make_scrolled_list(self.notebook)
-        self.conflict_list = self._make_scrolled_list(self.notebook)
-        self.conflict_list.bind("<Double-Button-1>", self.choose_conflict_action)
-        self.notebook.add(
-            self.phone_to_local_list._syncfiles_container,  # type: ignore[attr-defined]
-            text=self._tr("tab_phone_to_local"),
-        )
-        self.notebook.add(
-            self.local_to_phone_list._syncfiles_container,  # type: ignore[attr-defined]
-            text=self._tr("tab_local_to_phone"),
-        )
-        self.notebook.add(
-            self.conflict_list._syncfiles_container,  # type: ignore[attr-defined]
-            text=self._tr("tab_conflicts"),
-        )
-        self.tab_text_keys = [
-            (self.phone_to_local_list, "tab_phone_to_local"),
-            (self.local_to_phone_list, "tab_local_to_phone"),
-            (self.conflict_list, "tab_conflicts"),
+        # Two-pane aligned Treeview replaces the old 3-tab notebook. Rows are
+        # aligned by relative_path; conflicts show red, side-only files blue,
+        # and identical files are hidden behind a checkbox (off by default).
+        self.pane_container = ttk.Frame(outer)
+        self.pane_container.pack(fill=BOTH, expand=True)
+
+        # Header row: left pane title | spacer | center "Action" | right pane title.
+        header_row = ttk.Frame(self.pane_container)
+        header_row.pack(fill=X)
+        self.left_pane_header = ttk.Label(header_row)
+        self.left_pane_header.pack(side=LEFT, padx=(0, 8))
+        self._register(ttk.Label(header_row), "pane_center_header").pack(side=LEFT, expand=True)
+        self.right_pane_header = ttk.Label(header_row)
+        self.right_pane_header.pack(side=RIGHT, padx=(8, 0))
+        self.pane_label_keys = [
+            (self.left_pane_header, "pane_left_header_phone"),
+            (self.right_pane_header, "pane_right_header_phone"),
         ]
+
+        # Arrow row: [→] | checkbox | [←]. The active direction is bolded by
+        # configure(style=...) at render time.
+        arrow_row = ttk.Frame(self.pane_container)
+        arrow_row.pack(fill=X, pady=(2, 6))
+        self.left_to_right_button = ttk.Button(
+            arrow_row, command=self._flip_to_left_to_right
+        )
+        self.left_to_right_button.pack(side=LEFT, padx=4)
+        self.show_identical_var = BooleanVar(value=self.show_identical)
+        self.show_identical_checkbox = ttk.Checkbutton(
+            arrow_row,
+            variable=self.show_identical_var,
+            command=self._on_show_identical_toggle,
+        )
+        self.show_identical_checkbox.pack(side=LEFT, padx=12)
+        self.right_to_left_button = ttk.Button(
+            arrow_row, command=self._flip_to_right_to_left
+        )
+        self.right_to_left_button.pack(side=RIGHT, padx=4)
+        self.arrow_button_keys = [
+            (self.left_to_right_button, "arrow_left_to_right"),
+            (self.right_to_left_button, "arrow_right_to_left"),
+        ]
+        self.checkbox_keys = [
+            (self.show_identical_checkbox, "toggle_show_identical"),
+        ]
+
+        # Treeview body.
+        body = ttk.Frame(self.pane_container)
+        body.pack(fill=BOTH, expand=True)
+        body.columnconfigure(0, weight=1)
+        body.rowconfigure(0, weight=1)
+        columns = (
+            "left_name", "left_size", "left_mtime",
+            "direction",
+            "right_name", "right_size", "right_mtime",
+        )
+        self.tree = ttk.Treeview(body, columns=columns, show="headings", selectmode="browse")
+        for col, key, width, anchor in [
+            ("left_name", "col_left_name", 320, "w"),
+            ("left_size", "col_size", 80, "e"),
+            ("left_mtime", "col_mtime", 140, "e"),
+            ("direction", "pane_center_header", 60, "center"),
+            ("right_name", "col_right_name", 320, "w"),
+            ("right_size", "col_size", 80, "e"),
+            ("right_mtime", "col_mtime", 140, "e"),
+        ]:
+            self.tree.heading(col, text=self._tr(key))
+            self.tree.column(col, width=width, anchor=anchor, stretch=True)
+        self.column_heading_keys = [
+            ("left_name", "col_left_name"),
+            ("left_size", "col_size"),
+            ("left_mtime", "col_mtime"),
+            ("direction", "pane_center_header"),
+            ("right_name", "col_right_name"),
+            ("right_size", "col_size"),
+            ("right_mtime", "col_mtime"),
+        ]
+        # Row tags drive foreground color by status.
+        self.tree.tag_configure("phone_only", foreground="#1f6feb")        # blue
+        self.tree.tag_configure("local_only", foreground="#1f6feb")        # blue
+        self.tree.tag_configure("conflict", foreground="#d1242f")          # red
+        self.tree.tag_configure("resolved_conflict", foreground="#1a7f37") # dark green
+        self.tree.tag_configure("identical", foreground="#6e7781")         # gray
+        self.tree.bind("<<TreeviewSelect>>", self._on_tree_row_selected)
+        self.tree.bind("<Double-Button-1>", self._on_tree_row_activated)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(body, orient=VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscrollcommand=scroll.set)
+        scroll.grid(row=0, column=1, sticky="ns")
+
+        # Keep these around as None so any stale test attribute lookup doesn't
+        # AttributeError; tests that read them should be rewritten (see plan).
+        self.phone_to_local_list = None
+        self.local_to_phone_list = None
+        self.conflict_list = None
+        self.notebook = None
+
         self._refresh_mode_ui()
 
         self._register(ttk.Label(outer), "label_log").pack(anchor="w", pady=(8, 0))
@@ -479,18 +695,35 @@ class SyncFilesApp:
         ]
 
     def _render_plan(self) -> None:
-        self.phone_to_local_list.delete(0, END)
-        self.local_to_phone_list.delete(0, END)
-        self.conflict_list.delete(0, END)
+        # Wipe any previous render; deleting all children of the root "" node
+        # empties the Treeview in one call.
+        for iid in self.tree.get_children():
+            self.tree.delete(iid)
+        self._selected_row_path = ""
         if self.plan is None:
             return
-        for item in self.plan.phone_to_local:
-            self.phone_to_local_list.insert(END, item.relative_path)
-        for item in self.plan.local_to_phone:
-            self.local_to_phone_list.insert(END, item.relative_path)
-        for conflict in self.plan.conflicts:
-            action = self.conflict_choices.get(conflict.relative_path, ConflictAction.SKIP)
-            self.conflict_list.insert(END, f"{conflict.relative_path} [{self._conflict_action_label(action)}]")
+
+        rows = _build_row_views(self.plan)
+        for row in rows:
+            if row.status == "identical" and not self.show_identical:
+                continue
+            tags = self._row_tags(row)
+            self.tree.insert(
+                "",
+                END,
+                iid=row.relative_path,
+                values=(
+                    row.phone.relative_path if row.phone else "",
+                    _format_size(row.phone.size) if row.phone else "",
+                    _format_mtime(row.phone.modified_time) if row.phone else "",
+                    _direction_glyph_for_row(row, self.sync_direction),
+                    row.local.relative_path if row.local else "",
+                    _format_size(row.local.size) if row.local else "",
+                    _format_mtime(row.local.modified_time) if row.local else "",
+                ),
+                tags=tags,
+            )
+
         scan_complete_key = (
             "log_scan_complete" if self.sync_mode is SyncMode.PHONE else "log_scan_complete_hard_drive"
         )
@@ -502,14 +735,80 @@ class SyncFilesApp:
                 conflicts=len(self.plan.conflicts),
             )
         )
+        self._refresh_arrow_buttons()
 
-    def choose_conflict_action(self, _event: object | None = None) -> None:
+    def _row_tags(self, row: _RowView) -> tuple[str, ...]:
+        """Resolve the Treeview row tags for a given row.
+
+        Conflicts whose user choice is anything other than SKIP are shown in
+        dark green to confirm the resolution; unresolved conflicts stay red.
+        """
+        if row.status == "conflict":
+            action = self.conflict_choices.get(row.relative_path, ConflictAction.SKIP)
+            return ("resolved_conflict",) if action is not ConflictAction.SKIP else ("conflict",)
+        return (row.status,)
+
+    def _refresh_arrow_buttons(self) -> None:
+        """Visually mark the active direction button as bold."""
+        bold = ttk.Style()
+        bold.configure("Active.TButton", font=("TkDefaultFont", 10, "bold"))
+        if self.sync_direction == "left_to_right":
+            self.left_to_right_button.configure(style="Active.TButton")
+            self.right_to_left_button.configure(style="TButton")
+        else:
+            self.right_to_left_button.configure(style="Active.TButton")
+            self.left_to_right_button.configure(style="TButton")
+
+    def _flip_to_left_to_right(self) -> None:
+        self.sync_direction = "left_to_right"
+        self._render_plan()
+
+    def _flip_to_right_to_left(self) -> None:
+        self.sync_direction = "right_to_left"
+        self._render_plan()
+
+    def _on_show_identical_toggle(self) -> None:
+        self.show_identical = bool(self.show_identical_var.get())
+        self._render_plan()
+
+    def _on_tree_row_selected(self, _event: object = None) -> None:
+        iid = self.tree.focus()
+        if not iid:
+            return
+        self._selected_row_path = iid
+
+    def _on_tree_row_activated(self, _event: object = None) -> None:
         if self.plan is None:
             return
-        selection = self.conflict_list.curselection()
-        if not selection:
+        path = getattr(self, "_selected_row_path", "") or self.tree.focus()
+        if not path:
             return
-        conflict = self.plan.conflicts[selection[0]]
+        # Find the matching conflict; non-conflict rows do nothing on dbl-click.
+        for conflict in self.plan.conflicts:
+            if conflict.relative_path == path:
+                self._open_conflict_popup(conflict)
+                return
+
+    def choose_conflict_action(self, _event: object | None = None) -> None:
+        # Legacy entry point: only fires if some test still wires it. The
+        # primary path is now _on_tree_row_activated → _open_conflict_popup.
+        if self.plan is None:
+            return
+        # Use selected row's iid if available; fall back to first conflict.
+        path = getattr(self, "_selected_row_path", "")
+        for conflict in self.plan.conflicts:
+            if conflict.relative_path == path:
+                self._open_conflict_popup(conflict)
+                return
+        if self.plan.conflicts:
+            self._open_conflict_popup(self.plan.conflicts[0])
+
+    def _open_conflict_popup(self, conflict: Conflict) -> None:
+        """Open the 4-button resolution popup for one conflict row.
+
+        The popup records the choice in ``self.conflict_choices`` and then
+        re-renders so the row's color shifts from red → dark green.
+        """
         window = Toplevel(self.root)
         window.title(self._tr("dialog_conflict_action"))
         ttk.Label(window, text=conflict.relative_path).pack(fill=X, padx=12, pady=8)
@@ -523,29 +822,17 @@ class SyncFilesApp:
             window,
             text=self._conflict_action_label(ConflictAction.USE_PHONE),
             command=lambda: choose(ConflictAction.USE_PHONE),
-        ).pack(
-            fill=X,
-            padx=12,
-            pady=4,
-        )
+        ).pack(fill=X, padx=12, pady=4)
         ttk.Button(
             window,
             text=self._conflict_action_label(ConflictAction.USE_LOCAL),
             command=lambda: choose(ConflictAction.USE_LOCAL),
-        ).pack(
-            fill=X,
-            padx=12,
-            pady=4,
-        )
+        ).pack(fill=X, padx=12, pady=4)
         ttk.Button(
             window,
             text=self._conflict_action_label(ConflictAction.KEEP_BOTH),
             command=lambda: choose(ConflictAction.KEEP_BOTH),
-        ).pack(
-            fill=X,
-            padx=12,
-            pady=4,
-        )
+        ).pack(fill=X, padx=12, pady=4)
         ttk.Button(
             window,
             text=self._conflict_action_label(ConflictAction.SKIP),
@@ -577,7 +864,9 @@ class SyncFilesApp:
     def _sync_worker(self, local: Path, phone: str) -> None:
         if self.plan is None:
             return
-        operations = build_operations_from_plan(self.plan, self.conflict_choices)
+        operations = build_operations_from_view(
+            _build_row_views(self.plan), self.conflict_choices
+        )
         self.progress.start(
             total=len(operations),
             current_path=operations[0].relative_path if operations else None,
@@ -776,8 +1065,15 @@ class SyncFilesApp:
         )
         for widget, key in self.translatable_widgets:
             widget.configure(text=self._tr(key))
-        for tab, key in self.tab_text_keys:
-            self.notebook.tab(tab, text=self._tr(key))
+        # New dual-pane widgets replace the old notebook+tabs.
+        for label, key in self.pane_label_keys:
+            label.configure(text=self._tr(key))
+        for col, key in self.column_heading_keys:
+            self.tree.heading(col, text=self._tr(key))
+        for button, key in self.arrow_button_keys:
+            button.configure(text=self._tr(key))
+        for checkbox, key in self.checkbox_keys:
+            checkbox.configure(text=self._tr(key))
         self._refresh_mode_ui()
         self._refresh_status()
         self._render_plan()
@@ -810,14 +1106,10 @@ class SyncFilesApp:
                 text=self._tr("button_browse_phone"),
                 command=self.open_phone_browser,
             )
-            self.notebook.tab(
-                self.phone_to_local_list._syncfiles_container,  # type: ignore[attr-defined]
-                text=self._tr("tab_phone_to_local"),
-            )
-            self.notebook.tab(
-                self.local_to_phone_list._syncfiles_container,  # type: ignore[attr-defined]
-                text=self._tr("tab_local_to_phone"),
-            )
+            self.pane_label_keys = [
+                (self.left_pane_header, "pane_left_header_phone"),
+                (self.right_pane_header, "pane_right_header_phone"),
+            ]
         else:
             self.check_device_button.configure(state="disabled")
             self.first_folder_label.configure(text=self._tr("label_left_folder"))
@@ -826,18 +1118,14 @@ class SyncFilesApp:
                 text=self._tr("button_choose"),
                 command=self.choose_second_folder,
             )
-            self.notebook.tab(
-                self.phone_to_local_list._syncfiles_container,  # type: ignore[attr-defined]
-                text=self._tr("tab_right_to_left"),
-            )
-            self.notebook.tab(
-                self.local_to_phone_list._syncfiles_container,  # type: ignore[attr-defined]
-                text=self._tr("tab_left_to_right"),
-            )
-        self.notebook.tab(
-            self.conflict_list._syncfiles_container,  # type: ignore[attr-defined]
-            text=self._tr("tab_conflicts"),
-        )
+            self.pane_label_keys = [
+                (self.left_pane_header, "pane_left_header_hard_drive"),
+                (self.right_pane_header, "pane_right_header_hard_drive"),
+            ]
+        # Apply the current pane labels now and re-bind keys so the next
+        # language switch retitles them correctly.
+        for label, key in self.pane_label_keys:
+            label.configure(text=self._tr(key))
 
     def _refresh_status(self) -> None:
         if self.device_status is None:

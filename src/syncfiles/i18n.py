@@ -128,6 +128,66 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "冲突",
         Language.ENGLISH: "Conflicts",
     },
+    "pane_left_header_phone": {
+        Language.CHINESE: "手机",
+        Language.ENGLISH: "Phone",
+    },
+    "pane_left_header_hard_drive": {
+        Language.CHINESE: "左侧硬盘",
+        Language.ENGLISH: "Left hard drive",
+    },
+    "pane_right_header_phone": {
+        Language.CHINESE: "硬盘",
+        Language.ENGLISH: "Hard drive",
+    },
+    "pane_right_header_hard_drive": {
+        Language.CHINESE: "右侧硬盘",
+        Language.ENGLISH: "Right hard drive",
+    },
+    "pane_center_header": {
+        Language.CHINESE: "操作",
+        Language.ENGLISH: "Action",
+    },
+    "col_left_name": {
+        Language.CHINESE: "名称",
+        Language.ENGLISH: "Name",
+    },
+    "col_right_name": {
+        Language.CHINESE: "名称",
+        Language.ENGLISH: "Name",
+    },
+    "col_size": {
+        Language.CHINESE: "大小",
+        Language.ENGLISH: "Size",
+    },
+    "col_mtime": {
+        Language.CHINESE: "修改时间",
+        Language.ENGLISH: "Modified",
+    },
+    "arrow_left_to_right": {
+        Language.CHINESE: "→  左侧 → 右侧",
+        Language.ENGLISH: "→  Left → right",
+    },
+    "arrow_right_to_left": {
+        Language.CHINESE: "←  右侧 → 左侧",
+        Language.ENGLISH: "←  Right → left",
+    },
+    "toggle_show_identical": {
+        Language.CHINESE: "显示无差异文件",
+        Language.ENGLISH: "Show identical files",
+    },
+    "direction_glyph_left_to_right": {
+        Language.CHINESE: "→",
+        Language.ENGLISH: "→",
+    },
+    "direction_glyph_right_to_left": {
+        Language.CHINESE: "←",
+        Language.ENGLISH: "←",
+    },
+    "direction_glyph_conflict": {
+        Language.CHINESE: "!",
+        Language.ENGLISH: "!",
+    },
     "label_log": {
         Language.CHINESE: "日志",
         Language.ENGLISH: "Log",
