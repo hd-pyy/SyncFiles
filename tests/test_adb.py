@@ -127,8 +127,11 @@ def test_adb_commands_request_utf8_decoding() -> None:
     directories = AdbClient(adb_path="adb", runner=runner).list_directories("/sdcard")
 
     assert directories == ["/sdcard/黄鸟工具包"]
-    assert runner.call_kwargs[0]["encoding"] == "utf-8"
-    assert runner.call_kwargs[0]["errors"] == "replace"
+    # adb on Windows emits GBK when filenames contain non-ASCII; we ask
+    # subprocess for raw bytes and decode ourselves so a GBK blob doesn't
+    # blow up with UnicodeDecodeError.
+    assert runner.call_kwargs[0]["text"] is False
+    assert runner.call_kwargs[0].get("encoding") is None
 
 
 def test_scans_phone_folder_to_file_records() -> None:
@@ -206,3 +209,82 @@ def test_pull_raises_adb_error_when_binary_missing() -> None:
     runner = _MissingAdbRunner()
     with pytest.raises(AdbError, match="ADB is not installed"):
         AdbClient(adb_path="/does/not/exist/adb.exe", runner=runner).pull("/sdcard/Test/b.txt", "D:/Backup/b.txt")
+
+
+def test_pull_retries_transient_ghost_device_error() -> None:
+    """First invocation fails with the ghost-device blip; the retry succeeds."""
+    class _QueueRunner:
+        def __init__(self, results: list[subprocess.CompletedProcess[str]]) -> None:
+            self.results = results
+            self.calls = 0
+
+        def __call__(
+            self,
+            command: list[str],
+            *,
+            capture_output: bool = True,
+            text: bool = True,
+            encoding: str | None = None,
+            errors: str | None = None,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            self.calls += 1
+            result = self.results.pop(0)
+            if check and result.returncode != 0:
+                raise subprocess.CalledProcessError(result.returncode, command, result.stdout, result.stderr)
+            return result
+
+    queue_runner = _QueueRunner(
+        [
+            completed(stderr="adb: error: failed to get feature set: more than one device/emulator", returncode=1),
+            completed(returncode=0),
+        ]
+    )
+    import syncfiles.adb as adb_module
+    original_delay = adb_module._GHOST_RETRY_DELAY
+    adb_module._GHOST_RETRY_DELAY = 0.0
+    try:
+        AdbClient(adb_path="adb", runner=queue_runner).pull("/sdcard/Test/b.txt", "D:/Backup/b.txt")
+    finally:
+        adb_module._GHOST_RETRY_DELAY = original_delay
+    assert queue_runner.calls == 2
+
+
+def test_pull_surfaces_real_adb_error_after_ghost_retries_exhausted() -> None:
+    """If every retry still says ghost-device, raise AdbError with the detail."""
+    ghost = completed(stderr="adb: error: failed to get feature set: more than one device/emulator", returncode=1)
+
+    class _AlwaysGhost:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(
+            self,
+            command: list[str],
+            *,
+            capture_output: bool = True,
+            text: bool = True,
+            encoding: str | None = None,
+            errors: str | None = None,
+            check: bool = False,
+        ) -> subprocess.CompletedProcess[str]:
+            self.calls += 1
+            if check:
+                raise subprocess.CalledProcessError(ghost.returncode, command, ghost.stdout, ghost.stderr)
+            return ghost
+
+    import syncfiles.adb as adb_module
+    original_delay = adb_module._GHOST_RETRY_DELAY
+    original_attempts = adb_module._GHOST_RETRY_ATTEMPTS
+    adb_module._GHOST_RETRY_DELAY = 0.0
+    adb_module._GHOST_RETRY_ATTEMPTS = 3  # initial + 2 retries → keeps test fast
+    try:
+        runner = _AlwaysGhost()
+        with pytest.raises(AdbError) as info:
+            AdbClient(adb_path="adb", runner=runner).pull("/sdcard/Test/b.txt", "D:/Backup/b.txt")
+    finally:
+        adb_module._GHOST_RETRY_DELAY = original_delay
+        adb_module._GHOST_RETRY_ATTEMPTS = original_attempts
+    assert "Failed to pull" in str(info.value)
+    assert "more than one device" in str(info.value)
+    assert runner.calls == 3
