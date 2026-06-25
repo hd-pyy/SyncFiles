@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 import tkinter as tk
 
@@ -12,6 +13,7 @@ from syncfiles.app import (
     folders_share_basename,
     phone_folder_to_choose,
 )
+from syncfiles.adb import DeviceState, DeviceStatus
 from syncfiles.domain import (
     ConflictAction,
     FileRecord,
@@ -117,6 +119,23 @@ def test_build_operations_from_plan_includes_missing_files_and_conflict_choices(
         ("phone-only.jpg", SourceSide.PHONE, SourceSide.LOCAL),
         ("local-only.txt", SourceSide.LOCAL, SourceSide.PHONE),
         ("conflict.txt", SourceSide.LOCAL, SourceSide.PHONE),
+    ]
+
+
+def test_build_operations_from_plan_can_filter_to_one_direction() -> None:
+    plan = build_sync_plan(
+        phone_files=[record("right-only.txt", 1, 10, SourceSide.PHONE)],
+        local_files=[record("left-only.txt", 2, 20, SourceSide.LOCAL)],
+    )
+
+    to_right = build_operations_from_plan(plan, {}, destination_side=SourceSide.PHONE)
+    to_left = build_operations_from_plan(plan, {}, destination_side=SourceSide.LOCAL)
+
+    assert [(operation.relative_path, operation.destination_side) for operation in to_right] == [
+        ("left-only.txt", SourceSide.PHONE),
+    ]
+    assert [(operation.relative_path, operation.destination_side) for operation in to_left] == [
+        ("right-only.txt", SourceSide.LOCAL),
     ]
 
 
@@ -279,10 +298,47 @@ def test_default_sync_mode_is_hard_drive_to_hard_drive() -> None:
         assert str(app.check_device_button["state"]) == "disabled"
         assert app.second_folder_label.cget("text") == text("label_right_folder", app.language)
         assert app.second_choose_button.cget("text") == text("button_choose", app.language)
-        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
-            "tab_right_to_left",
-            app.language,
-        )
+        assert app.mode_label_widget.cget("text") == text("label_sync_mode", app.language)
+        assert app.sync_to_right_button.cget("text") == "→ " + text("label_sync_to_right", app.language)
+        assert app.sync_to_left_button.cget("text") == "← " + text("label_sync_to_left", app.language)
+        assert app.sync_to_right_label.cget("text") == text("label_sync_to_right", app.language)
+        assert app.sync_to_left_label.cget("text") == text("label_sync_to_left", app.language)
+        assert app.left_file_tree.winfo_exists()
+        assert app.right_file_tree.winfo_exists()
+    finally:
+        root.destroy()
+
+
+def test_direction_controls_are_centered_between_file_panels() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        center = app.sync_to_right_button.master
+
+        sticky = str(center.grid_info()["sticky"])
+        assert "n" in sticky and "s" in sticky
+
+        right_row = int(app.sync_to_right_button.grid_info()["row"])
+        left_row = int(app.sync_to_left_button.grid_info()["row"])
+        scan_row = int(app.scan_button.grid_info()["row"])
+        cancel_row = int(app.cancel_button.grid_info()["row"])
+
+        assert left_row == right_row + 1
+        assert right_row < scan_row < cancel_row
+    finally:
+        root.destroy()
+
+
+def test_modified_time_is_rendered_as_readable_local_datetime() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        timestamp = 1710000000
+
+        assert app._format_modified(timestamp) == datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+        assert app._format_modified(0) == ""
     finally:
         root.destroy()
 
@@ -304,10 +360,7 @@ def test_changing_sync_mode_updates_labels_and_clears_plan() -> None:
         assert str(app.check_device_button["state"]) == "normal"
         assert app.second_folder_label.cget("text") == text("label_phone_folder", app.language)
         assert app.second_choose_button.cget("text") == text("button_browse_phone", app.language)
-        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
-            "tab_phone_to_local",
-            app.language,
-        )
+        assert app.right_folder_title.cget("text") == text("label_phone_folder", app.language)
     finally:
         root.destroy()
 
@@ -325,12 +378,9 @@ def test_sftp_sync_mode_updates_labels_and_shows_connection_fields() -> None:
         assert str(app.check_device_button["state"]) == "disabled"
         assert app.first_folder_label.cget("text") == text("label_local_folder", app.language)
         assert app.second_folder_label.cget("text") == text("label_sftp_remote_folder", app.language)
-        assert str(app.second_choose_button["state"]) == "disabled"
+        assert str(app.second_choose_button["state"]) == "normal"
         assert app.sftp_frame.winfo_manager() == "pack"
-        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
-            "tab_sftp_to_local",
-            app.language,
-        )
+        assert app.right_folder_title.cget("text") == text("label_sftp_remote_folder", app.language)
     finally:
         root.destroy()
 
@@ -349,10 +399,7 @@ def test_refresh_language_updates_mode_selector_and_tabs() -> None:
             text("sync_mode_phone", Language.ENGLISH),
             text("sync_mode_sftp", Language.ENGLISH),
         )
-        assert app.notebook.tab(app.phone_to_local_list._syncfiles_container, "text") == text(
-            "tab_right_to_left",
-            Language.ENGLISH,
-        )
+        assert app.mode_label_widget.cget("text") == text("label_sync_mode", Language.ENGLISH)
     finally:
         root.destroy()
 
@@ -551,6 +598,36 @@ def test_hard_drive_mode_sync_copies_between_local_roots(tmp_path: Path) -> None
         root.destroy()
 
 
+def test_hard_drive_mode_directional_sync_copies_only_requested_direction(tmp_path: Path) -> None:
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    (left / "left-only.txt").write_text("left", encoding="utf-8")
+    (right / "right-only.txt").write_text("right", encoding="utf-8")
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.HARD_DRIVE
+        app.plan = build_sync_plan(
+            phone_files=[
+                record("right-only.txt", 5, 1, SourceSide.PHONE),
+            ],
+            local_files=[
+                record("left-only.txt", 4, 1, SourceSide.LOCAL),
+            ],
+        )
+        app.conflict_choices = {}
+
+        app._sync_worker(left, str(right), destination_side=SourceSide.PHONE)
+
+        assert (right / "left-only.txt").read_text(encoding="utf-8") == "left"
+        assert not (left / "right-only.txt").exists()
+    finally:
+        root.destroy()
+
+
 def test_sftp_mode_sync_uses_sftp_executor(tmp_path: Path) -> None:
     left = tmp_path / "left"
     left.mkdir()
@@ -602,6 +679,38 @@ def test_phone_mode_sync_still_uses_adb_transfer(tmp_path: Path) -> None:
 
         assert app.adb.pulls == [("/sdcard/Test/phone-only.txt", str(tmp_path / "local" / "phone-only.txt"))]
         assert app.adb.pushes == [(str(tmp_path / "local" / "local-only.txt"), "/sdcard/Test/local-only.txt")]
+    finally:
+        root.destroy()
+
+
+def test_phone_mode_requires_ready_device(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.PHONE
+        app.device_status = DeviceStatus(DeviceState.NO_DEVICE, "No Android device is connected.")
+        warnings: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            "syncfiles.app.messagebox.showwarning",
+            lambda title, message: warnings.append((title, message)),
+        )
+
+        assert app._phone_device_ready_or_warn() is False
+        assert warnings
+    finally:
+        root.destroy()
+
+
+def test_hard_drive_mode_does_not_require_phone_device() -> None:
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = SyncFilesApp(root)
+        app.sync_mode = SyncMode.HARD_DRIVE
+        app.device_status = DeviceStatus(DeviceState.NO_DEVICE, "No Android device is connected.")
+
+        assert app._phone_device_ready_or_warn() is True
     finally:
         root.destroy()
 

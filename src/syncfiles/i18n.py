@@ -88,6 +88,62 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "右侧硬盘文件夹",
         Language.ENGLISH: "Right hard drive folder",
     },
+    "label_sync_to_right": {
+        Language.CHINESE: "同步到右侧",
+        Language.ENGLISH: "Sync to right",
+    },
+    "label_sync_to_left": {
+        Language.CHINESE: "同步到左侧",
+        Language.ENGLISH: "Sync to left",
+    },
+    "column_name": {
+        Language.CHINESE: "名称",
+        Language.ENGLISH: "Name",
+    },
+    "column_size": {
+        Language.CHINESE: "大小",
+        Language.ENGLISH: "Size",
+    },
+    "column_modified": {
+        Language.CHINESE: "修改时间",
+        Language.ENGLISH: "Modified",
+    },
+    "column_status": {
+        Language.CHINESE: "状态",
+        Language.ENGLISH: "Status",
+    },
+    "file_status_same": {
+        Language.CHINESE: "一致",
+        Language.ENGLISH: "Same",
+    },
+    "file_status_only_left": {
+        Language.CHINESE: "仅左侧",
+        Language.ENGLISH: "Left only",
+    },
+    "file_status_only_right": {
+        Language.CHINESE: "仅右侧",
+        Language.ENGLISH: "Right only",
+    },
+    "file_status_conflict": {
+        Language.CHINESE: "冲突",
+        Language.ENGLISH: "Conflict",
+    },
+    "file_status_skip": {
+        Language.CHINESE: "忽略",
+        Language.ENGLISH: "Skipped",
+    },
+    "summary_no_scan": {
+        Language.CHINESE: "尚未扫描",
+        Language.ENGLISH: "Not scanned",
+    },
+    "summary_left": {
+        Language.CHINESE: "总文件 {total} | 可同步到右侧 {to_right} | 冲突 {conflicts}",
+        Language.ENGLISH: "{total} files | {to_right} to right | {conflicts} conflicts",
+    },
+    "summary_right": {
+        Language.CHINESE: "总文件 {total} | 可同步到左侧 {to_left} | 冲突 {conflicts}",
+        Language.ENGLISH: "{total} files | {to_left} to left | {conflicts} conflicts",
+    },
     "button_choose": {
         Language.CHINESE: "选择",
         Language.ENGLISH: "Choose",
@@ -204,6 +260,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "当前正在扫描或同步，请等待完成后再操作。",
         Language.ENGLISH: "A scan or sync is already running. Wait for it to finish.",
     },
+    "dialog_device_not_ready_title": {
+        Language.CHINESE: "设备未就绪",
+        Language.ENGLISH: "Device not ready",
+    },
     "dialog_sftp_config_title": {
         Language.CHINESE: "SFTP 配置不完整",
         Language.ENGLISH: "Incomplete SFTP configuration",
@@ -215,6 +275,10 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "error_sftp_invalid_port": {
         Language.CHINESE: "请输入 1 到 65535 之间的 SFTP 端口。",
         Language.ENGLISH: "Enter an SFTP port between 1 and 65535.",
+    },
+    "error_sftp_missing_connection_fields": {
+        Language.CHINESE: "请输入 SFTP 主机、用户名和密码后再测试连接。",
+        Language.ENGLISH: "Enter SFTP host, username, and password before testing the connection.",
     },
     "dialog_no_phone_selection_title": {
         Language.CHINESE: "未选择文件夹",
@@ -407,6 +471,62 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
     "conflict_use_hard_drive": {
         Language.CHINESE: "使用硬盘版本",
         Language.ENGLISH: "Use hard drive version",
+    },
+    "button_test_sftp": {
+        Language.CHINESE: "测试连接",
+        Language.ENGLISH: "Test connection",
+    },
+    "log_sftp_testing": {
+        Language.CHINESE: "正在测试 SFTP 连接...",
+        Language.ENGLISH: "Testing SFTP connection...",
+    },
+    "log_sftp_test_succeeded": {
+        Language.CHINESE: "SFTP 连接成功。",
+        Language.ENGLISH: "SFTP connection succeeded.",
+    },
+    "log_sftp_test_failed": {
+        Language.CHINESE: "SFTP 连接失败：{message}",
+        Language.ENGLISH: "SFTP connection failed: {message}",
+    },
+    "dialog_sftp_test_succeeded_title": {
+        Language.CHINESE: "SFTP 连接成功",
+        Language.ENGLISH: "SFTP connection succeeded",
+    },
+    "dialog_sftp_test_succeeded_message": {
+        Language.CHINESE: "已成功连接到 SFTP 服务器。",
+        Language.ENGLISH: "Successfully connected to the SFTP server.",
+    },
+    "dialog_sftp_test_failed_title": {
+        Language.CHINESE: "SFTP 连接失败",
+        Language.ENGLISH: "SFTP connection failed",
+    },
+    "dialog_sftp_test_failed_message": {
+        Language.CHINESE: "无法连接到 SFTP 服务器：\n{message}",
+        Language.ENGLISH: "Could not connect to the SFTP server:\n{message}",
+    },
+    "button_browse_sftp": {
+        Language.CHINESE: "浏览 SFTP",
+        Language.ENGLISH: "Browse SFTP",
+    },
+    "dialog_choose_sftp": {
+        Language.CHINESE: "选择 SFTP 远端文件夹",
+        Language.ENGLISH: "Choose SFTP remote folder",
+    },
+    "sftp_browser_loading": {
+        Language.CHINESE: "正在连接 SFTP...",
+        Language.ENGLISH: "Connecting to SFTP...",
+    },
+    "dialog_sftp_error_title": {
+        Language.CHINESE: "SFTP 错误",
+        Language.ENGLISH: "SFTP error",
+    },
+    "dialog_no_sftp_selection_title": {
+        Language.CHINESE: "未选择文件夹",
+        Language.ENGLISH: "No folder selected",
+    },
+    "dialog_no_sftp_selection_message": {
+        Language.CHINESE: "请先在列表中选择一个 SFTP 文件夹。",
+        Language.ENGLISH: "Select an SFTP folder from the list first.",
     },
 }
 

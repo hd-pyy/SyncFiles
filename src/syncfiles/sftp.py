@@ -6,6 +6,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Protocol
 
+# Top-level so PyInstaller's static analysis picks the import up and bundles
+# paramiko (plus its C-extension deps: cryptography, bcrypt, pynacl). Putting
+# it inside SftpClient.connect() left it as a "delayed, conditional, optional"
+# import in the analysis report, which meant the shipped exe raised
+# "No module named 'paramiko'" the first time the user actually tried to
+# connect.
+import paramiko
+
 from syncfiles.domain import FileRecord, OperationCancelled, SourceSide
 from syncfiles.local_fs import ensure_parent_directory
 
@@ -118,6 +126,27 @@ class SftpSession:
         visit(root, "")
         return records
 
+    def list_directories(self, remote_path: str) -> list[str]:
+        """Return the immediate subdirectory names under ``remote_path``.
+
+        Mirrors ``AdbClient.list_directories`` so the UI's remote-folder
+        browser can stay mode-agnostic. The returned names are bare
+        basenames (no path prefix) — the caller joins them onto the
+        current path. Hidden directories (dotfiles) are included; the
+        SFTP file browser shows them and lets the user pick them, same
+        as a real SFTP client would.
+        """
+        root = normalize_remote_path(remote_path)
+        names: list[str] = []
+        for attrs in self.sftp.listdir_attr(root):
+            if attrs.filename in (".", ".."):
+                continue
+            if not stat.S_ISDIR(attrs.st_mode):
+                continue
+            names.append(attrs.filename)
+        names.sort()
+        return names
+
     def download_file(self, remote_path: str, local_path: Path) -> None:
         ensure_parent_directory(local_path)
         self.sftp.get(normalize_remote_path(remote_path), str(local_path))
@@ -149,8 +178,6 @@ class SftpClient:
         ssh = None
         try:
             if self.ssh_factory is None:
-                import paramiko
-
                 ssh = paramiko.SSHClient()
                 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             else:
