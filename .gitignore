@@ -10,6 +10,8 @@ __pycache__/
 # PyInstaller build artifacts
 build/
 dist/
+build-release/
+dist-release/
 
 # Adb fallback binaries (downloaded at build time, see docs/building.md)
 src/syncfiles/adb_fallback/

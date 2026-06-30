@@ -63,7 +63,7 @@ python -m syncfiles
    .venv\Scripts\pyinstaller --noconfirm SyncFiles.spec
    ```
 
-3. **产物**:`dist\SyncFiles.exe`(约 16 MB),单文件,直接拷贝给最终用户即可。
+3. **产物**:`dist\SyncFiles.exe`(约 22 MB),单文件,直接拷贝给最终用户即可。
 
 ### adb 解析顺序
 
