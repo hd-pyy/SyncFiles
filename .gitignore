@@ -16,3 +16,4 @@ src/syncfiles/adb_fallback/
 
 docs/
 tests/
+.superpowers/
