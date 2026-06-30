@@ -216,6 +216,58 @@ TRANSLATIONS: dict[str, dict[Language, str]] = {
         Language.CHINESE: "冲突",
         Language.ENGLISH: "Conflicts",
     },
+    "pane_left_header_phone": {
+        Language.CHINESE: "手机",
+        Language.ENGLISH: "Phone",
+    },
+    "pane_left_header_hard_drive": {
+        Language.CHINESE: "左侧硬盘",
+        Language.ENGLISH: "Left hard drive",
+    },
+    "pane_right_header_phone": {
+        Language.CHINESE: "硬盘",
+        Language.ENGLISH: "Hard drive",
+    },
+    "pane_right_header_hard_drive": {
+        Language.CHINESE: "右侧硬盘",
+        Language.ENGLISH: "Right hard drive",
+    },
+    "arrow_left_to_right": {
+        Language.CHINESE: "→  左侧到右侧",
+        Language.ENGLISH: "→  Left to right",
+    },
+    "arrow_right_to_left": {
+        Language.CHINESE: "←  右侧到左侧",
+        Language.ENGLISH: "←  Right to left",
+    },
+    "toggle_show_identical": {
+        Language.CHINESE: "显示无差异文件",
+        Language.ENGLISH: "Show identical files",
+    },
+    "group_different_files": {
+        Language.CHINESE: "不同文件 ({count})",
+        Language.ENGLISH: "Different files ({count})",
+    },
+    "group_conflict_files": {
+        Language.CHINESE: "冲突文件 ({count})",
+        Language.ENGLISH: "Conflict files ({count})",
+    },
+    "group_identical_files": {
+        Language.CHINESE: "无差异文件 ({count})",
+        Language.ENGLISH: "Identical files ({count})",
+    },
+    "meta_with_date_size": {
+        Language.CHINESE: "{date} · {size}",
+        Language.ENGLISH: "{date} · {size}",
+    },
+    "meta_left_updated": {
+        Language.CHINESE: "左侧更新: {date} · {size}",
+        Language.ENGLISH: "Left updated: {date} · {size}",
+    },
+    "meta_right_updated": {
+        Language.CHINESE: "右侧更新: {date} · {size}",
+        Language.ENGLISH: "Right updated: {date} · {size}",
+    },
     "label_log": {
         Language.CHINESE: "日志",
         Language.ENGLISH: "Log",

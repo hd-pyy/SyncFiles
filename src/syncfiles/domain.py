@@ -20,7 +20,20 @@ class AdbError(Exception):
     pre-flight check, and ``AdbError`` for the mid-run case where adb
     vanished (e.g. antivirus quarantined the bundled binary between
     app start and a sync run).
+
+    When constructed from a non-zero adb invocation, ``detail`` carries
+    adb's own stderr/stdout so the GUI can show the real reason instead
+    of a generic "returned non-zero status" message.
     """
+
+    def __init__(self, message: str, detail: str | None = None) -> None:
+        super().__init__(message)
+        self.detail = (detail or "").strip() or None
+
+    def __str__(self) -> str:
+        if self.detail:
+            return f"{self.args[0]}\n\n{self.detail}"
+        return self.args[0]
 
 
 class SourceSide(StrEnum):
@@ -73,6 +86,7 @@ class SyncPlan:
     phone_to_local: list[FileRecord] = field(default_factory=list)
     local_to_phone: list[FileRecord] = field(default_factory=list)
     conflicts: list[Conflict] = field(default_factory=list)
+    identical: list[FileRecord] = field(default_factory=list)
 
 
 def build_sync_plan(phone_files: list[FileRecord], local_files: list[FileRecord]) -> SyncPlan:
@@ -89,6 +103,10 @@ def build_sync_plan(phone_files: list[FileRecord], local_files: list[FileRecord]
             plan.phone_to_local.append(phone)
         elif phone is not None and local is not None and _is_conflict(phone, local):
             plan.conflicts.append(Conflict(relative_path=relative_path, phone=phone, local=local))
+        elif phone is not None and local is not None:
+            # Same path on both sides and no diff — keep one copy so the UI
+            # can show it (hidden by default, surfaced via a toggle).
+            plan.identical.append(phone)
 
     return plan
 

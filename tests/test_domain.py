@@ -50,6 +50,19 @@ def test_skips_identical_files_present_on_both_sides() -> None:
     assert plan.conflicts == []
 
 
+def test_collects_identical_files_in_separate_bucket() -> None:
+    plan = build_sync_plan(
+        phone_files=[record("same.bin", size=42, modified=200, side=SourceSide.PHONE)],
+        local_files=[record("same.bin", size=42, modified=200, side=SourceSide.LOCAL)],
+    )
+
+    assert [f.relative_path for f in plan.identical] == ["same.bin"]
+    # Other buckets remain untouched.
+    assert plan.phone_to_local == []
+    assert plan.local_to_phone == []
+    assert plan.conflicts == []
+
+
 def test_marks_same_relative_path_with_different_metadata_as_conflict() -> None:
     plan = build_sync_plan(
         phone_files=[record("notes.txt", size=10, modified=100, side=SourceSide.PHONE)],
